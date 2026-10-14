@@ -35,6 +35,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useCustomerAuth, type CustomerOrderSummary } from "@/lib/auth";
 import { formatINR, BRAND_NAME, CAMPUS_NAME } from "@/data/products";
 import { resolveOrderItemImage, BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
+import { isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -88,6 +89,19 @@ function AccountPage() {
 
   // Auth tab: "signin" | "signup" | "forgot"
   const [authTab, setAuthTab] = useState<"signin" | "signup" | "forgot">("signin");
+  // Customer dashboard active tab: "orders" | "profile"
+  const [activeTab, setActiveTab] = useState<string>("orders");
+
+  // Sync active tab with URL search parameter
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "orders" || tabParam === "profile") {
+        setActiveTab(tabParam);
+      }
+    }
+  }, []);
 
   // Sign In state
   const [signInEmail, setSignInEmail] = useState("");
@@ -341,6 +355,19 @@ function AccountPage() {
           </div>
 
           <div className="mt-6 rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
+            {!isSupabaseConfigured && (
+              <div className="mb-5 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive space-y-1">
+                <div className="flex items-center gap-2 font-bold text-sm">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span>Database Authentication Not Configured</span>
+                </div>
+                <p>
+                  Missing environment variable(s):{" "}
+                  <strong>{validateSupabaseConfig().missing.join(", ")}</strong>. Please configure them in your Vercel Project Settings.
+                </p>
+              </div>
+            )}
+
             {authTab === "forgot" ? (
               <div>
                 <h2 className="font-display text-lg font-bold text-foreground">Reset Password</h2>
@@ -627,7 +654,7 @@ function AccountPage() {
       </div>
 
       {/* Account Tabs */}
-      <Tabs defaultValue="orders" className="mt-8">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">
         <TabsList className="grid w-full max-w-md grid-cols-2 rounded-2xl">
           <TabsTrigger value="orders" className="rounded-xl font-semibold gap-1.5">
             <Package className="size-4" />

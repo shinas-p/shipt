@@ -39,7 +39,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
 import { formatINR, categories as defaultCategories } from "@/data/products";
 import { BRAND_FALLBACK_IMAGE, resolveOrderItemImage } from "@/lib/catalogApi";
 import { useStore } from "@/lib/store";
@@ -427,6 +427,17 @@ export function AdminPage() {
     setLoginError(null);
     setIsLoggingIn(true);
 
+    if (!isSupabaseConfigured) {
+      const { missing } = validateSupabaseConfig();
+      setLoginError(
+        `Supabase authentication is not configured in this deployment (missing ${missing.join(
+          ", "
+        )}). Please configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your Vercel Project Settings.`
+      );
+      setIsLoggingIn(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
@@ -452,7 +463,14 @@ export function AdminPage() {
         await checkAuth();
       }
     } catch (err: any) {
-      setLoginError(err?.message || "Failed to sign in");
+      const message = err?.message || "Failed to sign in";
+      if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
+        setLoginError(
+          "Network error: Unable to connect to Supabase auth server. Please check your internet connection or verify the Supabase project URL."
+        );
+      } else {
+        setLoginError(message);
+      }
     } finally {
       setIsLoggingIn(false);
     }

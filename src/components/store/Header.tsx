@@ -1,9 +1,10 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { MapPin, Menu, Search, ShoppingBag, User, X, Heart, Package } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import { useCustomerAuth } from "@/lib/auth";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { BRAND_NAME, BRAND_TAGLINE, CAMPUS_NAME, categories } from "@/data/products";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OrderTrackerModal } from "./OrderTrackerModal";
@@ -47,10 +48,42 @@ export function SearchBar({ className = "" }: { className?: string }) {
 }
 
 export function Header() {
+  const navigate = useNavigate();
   const { itemCount, setCartOpen, setCategory, wishlist } = useStore();
-  const { user, profile } = useCustomerAuth();
+  const { user, profile, isLoading } = useCustomerAuth();
   const [menu, setMenu] = useState(false);
   const [trackerOpen, setTrackerOpen] = useState(false);
+
+  const handleOrdersClick = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setMenu(false);
+
+    // If customer is already authenticated: navigate directly to My Orders
+    if (user) {
+      navigate({ to: "/account", search: { tab: "orders" } });
+      return;
+    }
+
+    // If auth session is still hydrating, check Supabase directly to prevent
+    // incorrectly routing signed-in customers into the guest tracker
+    if (isLoading && isSupabaseConfigured) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.user) {
+          navigate({ to: "/account", search: { tab: "orders" } });
+          return;
+        }
+      } catch {
+        // Fall back to guest tracker
+      }
+    }
+
+    // Unauthenticated guest customer: open guest order tracking modal
+    setTrackerOpen(true);
+  };
 
   const userInitial = (profile?.full_name?.[0] || user?.email?.[0] || "U").toUpperCase();
 
@@ -86,26 +119,16 @@ export function Header() {
           </button>
           <SearchBar className="mx-auto hidden max-w-md flex-1 md:block" />
           <div className="ml-auto flex items-center gap-1 md:ml-0">
-            {user ? (
-              <Link
-                to="/account"
-                className="hidden items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold hover:bg-secondary sm:inline-flex"
-                aria-label="My Orders"
-              >
-                <Package className="size-4 text-primary" />
-                <span>Orders</span>
-              </Link>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setTrackerOpen(true)}
-                className="hidden items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold hover:bg-secondary sm:inline-flex"
-                aria-label="Orders"
-              >
-                <Package className="size-4 text-primary" />
-                <span>Orders</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleOrdersClick}
+              className="hidden items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold hover:bg-secondary sm:inline-flex"
+              aria-label="Orders"
+              title={user ? "My Orders" : "Orders"}
+            >
+              <Package className="size-4 text-primary" />
+              <span>Orders</span>
+            </button>
 
             <button
               type="button"
@@ -151,26 +174,16 @@ export function Header() {
         </div>
         <div className="container-page pb-3 md:hidden flex items-center gap-2">
           <SearchBar className="flex-1" />
-          {user ? (
-            <Link
-              to="/account"
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-xs font-semibold shadow-2xs"
-              aria-label="My Orders"
-            >
-              <Package className="size-4 text-primary" />
-              <span>Orders</span>
-            </Link>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setTrackerOpen(true)}
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-xs font-semibold shadow-2xs"
-              aria-label="Orders"
-            >
-              <Package className="size-4 text-primary" />
-              <span>Orders</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleOrdersClick}
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-xs font-semibold shadow-2xs"
+            aria-label="Orders"
+            title={user ? "My Orders" : "Orders"}
+          >
+            <Package className="size-4 text-primary" />
+            <span>Orders</span>
+          </button>
         </div>
       </header>
 
@@ -202,38 +215,20 @@ export function Header() {
               </div>
             </Link>
 
-            {user ? (
-              <Link
-                to="/account"
-                onClick={() => setMenu(false)}
-                className="flex items-center justify-between rounded-xl bg-card border border-border/70 p-3 font-semibold text-sm hover:bg-secondary transition"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
-                    <Package className="size-4" />
-                  </div>
-                  <span>My Orders</span>
+            <button
+              type="button"
+              onClick={handleOrdersClick}
+              className="w-full flex items-center justify-between rounded-xl bg-card border border-border/70 p-3 font-semibold text-sm hover:bg-secondary transition text-left"
+              aria-label={user ? "My Orders" : "Orders"}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
+                  <Package className="size-4" />
                 </div>
-                <span className="text-xs text-primary font-bold">View →</span>
-              </Link>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(false);
-                  setTrackerOpen(true);
-                }}
-                className="w-full flex items-center justify-between rounded-xl bg-card border border-border/70 p-3 font-semibold text-sm hover:bg-secondary transition text-left"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
-                    <Package className="size-4" />
-                  </div>
-                  <span>Track Guest Order</span>
-                </div>
-                <span className="text-xs text-primary font-bold">Track →</span>
-              </button>
-            )}
+                <span>{user ? "My Orders" : "Orders"}</span>
+              </div>
+              <span className="text-xs text-primary font-bold">{user ? "View →" : "Track →"}</span>
+            </button>
 
             <Link
               to="/cart"

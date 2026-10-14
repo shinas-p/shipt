@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { User, Session } from "@supabase/supabase-js";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { supabase, isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
 import { toast } from "sonner";
 
 export interface CustomerProfile {
@@ -150,7 +150,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     if (!isSupabaseConfigured) {
-      return { success: false, error: "Database authentication is not configured." };
+      const { missing } = validateSupabaseConfig();
+      return {
+        success: false,
+        error: `Supabase authentication is not configured in this environment (missing ${missing.join(", ")}). Please add these variables in your Vercel Project Settings.`,
+      };
     }
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -186,7 +190,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   ) => {
     if (!isSupabaseConfigured) {
-      return { success: false, error: "Database authentication is not configured." };
+      const { missing } = validateSupabaseConfig();
+      return {
+        success: false,
+        error: `Supabase authentication is not configured in this environment (missing ${missing.join(", ")}). Please add these variables in your Vercel Project Settings.`,
+      };
     }
 
     try {
@@ -250,7 +258,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const resetPassword = async (email: string) => {
     if (!isSupabaseConfigured) {
-      return { success: false, error: "Database authentication is not configured." };
+      const { missing } = validateSupabaseConfig();
+      return {
+        success: false,
+        error: `Supabase authentication is not configured in this environment (missing ${missing.join(", ")}). Please add these variables in your Vercel Project Settings.`,
+      };
     }
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
