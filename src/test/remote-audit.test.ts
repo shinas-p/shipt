@@ -3,7 +3,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import * as fs from "fs";
 import * as path from "path";
 
-describe("Shipt Live End-to-End & Remote Supabase Security Audit", () => {
+describe("Shipt Live End-to-End & Remote Supabase Security Audit", { timeout: 25000 }, () => {
   it("verifies live Supabase connectivity and catalogue data", async () => {
     if (!isSupabaseConfigured) {
       console.warn("Supabase not configured in current environment, skipping live query.");
