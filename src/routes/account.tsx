@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import {
   User,
@@ -87,12 +87,15 @@ function AccountPage() {
   const { user, profile, isLoading, signIn, signUp, signOut, resetPassword, updateProfile, fetchCustomerOrders } =
     useCustomerAuth();
 
+  const location = useLocation();
+
   // Auth tab: "signin" | "signup" | "forgot"
   const [authTab, setAuthTab] = useState<"signin" | "signup" | "forgot">("signin");
   // Customer dashboard active tab: "orders" | "profile"
   const [activeTab, setActiveTab] = useState<string>("orders");
+  const [signUpConfirmationEmail, setSignUpConfirmationEmail] = useState<string | null>(null);
 
-  // Sync active tab with URL search parameter
+  // Sync active tab with URL search parameter reactively
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -101,7 +104,16 @@ function AccountPage() {
         setActiveTab(tabParam);
       }
     }
-  }, []);
+  }, [location.search]);
+
+  const handleTabChange = (val: string) => {
+    setActiveTab(val);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", val);
+      window.history.replaceState({}, "", url.toString());
+    }
+  };
 
   // Sign In state
   const [signInEmail, setSignInEmail] = useState("");
@@ -244,6 +256,8 @@ function AccountPage() {
     setSignInLoading(false);
     if (!res.success) {
       setSignInError(res.error || "Unable to sign in.");
+    } else {
+      setSignUpConfirmationEmail(null);
     }
   };
 
@@ -286,6 +300,10 @@ function AccountPage() {
     setSignUpLoading(false);
     if (!res.success) {
       setSignUpError(res.error || "Unable to create account.");
+    } else if (res.requiresEmailConfirmation) {
+      setSignUpConfirmationEmail(signUpEmail);
+      setSignInEmail(signUpEmail);
+      setAuthTab("signin");
     }
   };
 
@@ -440,6 +458,18 @@ function AccountPage() {
 
                 {/* SIGN IN TAB */}
                 <TabsContent value="signin" className="mt-5 space-y-4">
+                  {signUpConfirmationEmail && (
+                    <div className="flex items-start gap-2.5 rounded-2xl border border-emerald-600/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-800 dark:text-emerald-200">
+                      <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Account created! Check your email</p>
+                        <p className="mt-0.5">
+                          A confirmation link was sent to <strong>{signUpConfirmationEmail}</strong>. Please verify your email before signing in.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {signInError && (
                     <div className="flex items-center gap-2 rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
                       <AlertCircle className="size-4 shrink-0" />
@@ -654,7 +684,7 @@ function AccountPage() {
       </div>
 
       {/* Account Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-8">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-8">
         <TabsList className="grid w-full max-w-md grid-cols-2 rounded-2xl">
           <TabsTrigger value="orders" className="rounded-xl font-semibold gap-1.5">
             <Package className="size-4" />

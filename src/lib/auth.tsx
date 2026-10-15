@@ -72,7 +72,7 @@ interface AuthContextType {
       default_block?: string;
       default_room?: string;
     }
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; requiresEmailConfirmation?: boolean; error?: string }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (data: Partial<CustomerProfile>) => Promise<{ success: boolean; error?: string }>;
@@ -99,6 +99,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!error && data) {
         setProfile(data as CustomerProfile);
+      } else if (!data && !error) {
+        // Safe profile synchronization: create empty profile if missing
+        const { data: newProf } = await supabase
+          .from("profiles")
+          .upsert({ id: userId }, { onConflict: "id" })
+          .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+          .maybeSingle();
+        if (newProf) {
+          setProfile(newProf as CustomerProfile);
+        }
       }
     } catch {
       // Graceful fallback if profile cannot be fetched
@@ -198,8 +208,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         password,
         options: {
           data: {
@@ -213,30 +224,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: error.message };
       }
 
-      if (data.user) {
+      // Supabase anti-enumeration: if email confirmation is enabled and user exists,
+      // data.user exists but identities array is empty
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        return {
+          success: false,
+          error: "An account with this email address already exists. Please sign in or reset your password.",
+        };
+      }
+
+      if (data.session) {
         setUser(data.user);
         setSession(data.session);
 
-        // Update additional hostel delivery fields in profiles if provided
-        if (profileData && (profileData.default_hostel || profileData.default_block || profileData.default_room)) {
+        // Safe profile synchronization for delivery details
+        if (data.user && profileData) {
           try {
             await supabase
               .from("profiles")
-              .update({
+              .upsert({
+                id: data.user.id,
+                full_name: profileData.full_name?.trim() || null,
+                phone: profileData.phone?.trim() || null,
                 default_hostel: profileData.default_hostel || null,
                 default_block: profileData.default_block || null,
                 default_room: profileData.default_room || null,
-              })
-              .eq("id", data.user.id);
+              }, { onConflict: "id" });
           } catch {
             // Non-blocking
           }
+          await fetchProfile(data.user.id);
         }
-        await fetchProfile(data.user.id);
+        toast.success("Welcome to Shipt! Account created successfully.");
+        return { success: true, requiresEmailConfirmation: false };
+      } else if (data.user) {
+        // User created, but email confirmation is required by Supabase Auth policy
+        // Crucial: Clear local unauthenticated session state
+        setUser(null);
+        setSession(null);
+        toast.success("Account created! Please check your email to confirm your account before signing in.", {
+          duration: 6000,
+        });
+        return { success: true, requiresEmailConfirmation: true };
       }
 
-      toast.success("Account created successfully!");
-      return { success: true };
+      return { success: false, error: "Unable to complete registration. Please try again." };
     } catch (err: any) {
       return { success: false, error: err?.message || "Failed to create account." };
     }
@@ -283,16 +315,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: false, error: "You must be signed in to update your profile." };
     }
     try {
+      const updatePayload: {
+        id: string;
+        full_name?: string | null;
+        phone?: string | null;
+        default_hostel?: string | null;
+        default_block?: string | null;
+        default_room?: string | null;
+      } = {
+        id: user.id,
+      };
+      if (data.full_name !== undefined) updatePayload.full_name = data.full_name;
+      else if (profile?.full_name !== undefined) updatePayload.full_name = profile.full_name;
+
+      if (data.phone !== undefined) updatePayload.phone = data.phone;
+      else if (profile?.phone !== undefined) updatePayload.phone = profile.phone;
+
+      if (data.default_hostel !== undefined) updatePayload.default_hostel = data.default_hostel;
+      else if (profile?.default_hostel !== undefined) updatePayload.default_hostel = profile.default_hostel;
+
+      if (data.default_block !== undefined) updatePayload.default_block = data.default_block;
+      else if (profile?.default_block !== undefined) updatePayload.default_block = profile.default_block;
+
+      if (data.default_room !== undefined) updatePayload.default_room = data.default_room;
+      else if (profile?.default_room !== undefined) updatePayload.default_room = profile.default_room;
+
       const { error } = await supabase
         .from("profiles")
-        .update({
-          full_name: data.full_name !== undefined ? data.full_name : profile?.full_name,
-          phone: data.phone !== undefined ? data.phone : profile?.phone,
-          default_hostel: data.default_hostel !== undefined ? data.default_hostel : profile?.default_hostel,
-          default_block: data.default_block !== undefined ? data.default_block : profile?.default_block,
-          default_room: data.default_room !== undefined ? data.default_room : profile?.default_room,
-        })
-        .eq("id", user.id);
+        .upsert(updatePayload, { onConflict: "id" });
 
       if (error) {
         return { success: false, error: error.message };

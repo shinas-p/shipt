@@ -455,9 +455,13 @@ export function AdminPage() {
       // Verify admin authorization
       const { data: adminStatus } = await supabase.rpc("is_admin");
       if (!adminStatus) {
+        await supabase.auth.signOut();
+        setSession(null);
         setIsAdmin(false);
         setAdminRole(null);
-        setLoginError("Access Denied: This account does not have staff or administrator privileges.");
+        setLoginError(
+          "Access Denied: This account is authenticated but does not have administrator or staff privileges. Please sign in with an authorized administrator account."
+        );
       } else {
         setIsAdmin(true);
         await checkAuth();
@@ -929,6 +933,24 @@ export function AdminPage() {
             <div className="mt-4 flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
               <AlertCircle className="size-4 shrink-0" />
               <span>{loginError}</span>
+            </div>
+          )}
+
+          {session && !isAdmin && (
+            <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+              <div className="min-w-0">
+                <p className="font-semibold truncate">Signed in as customer ({session.user?.email})</p>
+                <p className="text-[11px] text-muted-foreground">Admin credentials required to view dashboard</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSignOut}
+                className="h-8 shrink-0 text-xs font-bold"
+              >
+                Sign Out
+              </Button>
             </div>
           )}
 
