@@ -130,15 +130,19 @@ export function Header() {
               <span>Orders</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => toast(`${wishlist.length} item(s) in your wishlist`)}
-              className="relative hidden size-10 place-items-center rounded-full hover:bg-secondary sm:grid"
+            <Link
+              to="/wishlist"
+              className="relative grid size-10 place-items-center rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground transition"
               aria-label="Wishlist"
+              title="Saved Wishlist"
             >
               <Heart className="size-5" />
-              {wishlist.length > 0 && <span className="absolute right-1 top-1 size-2 rounded-full bg-destructive" />}
-            </button>
+              {wishlist.length > 0 && (
+                <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                  {wishlist.length}
+                </span>
+              )}
+            </Link>
 
             <Link
               to="/account"
@@ -243,6 +247,22 @@ export function Header() {
               </div>
               <span className="grid min-w-5 place-items-center rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-lime-foreground">
                 {itemCount}
+              </span>
+            </Link>
+
+            <Link
+              to="/wishlist"
+              onClick={() => setMenu(false)}
+              className="flex items-center justify-between rounded-xl bg-card border border-border/70 p-3 font-semibold text-sm hover:bg-secondary transition"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
+                  <Heart className="size-4" />
+                </div>
+                <span>Saved Wishlist</span>
+              </div>
+              <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
+                {wishlist.length}
               </span>
             </Link>
           </div>

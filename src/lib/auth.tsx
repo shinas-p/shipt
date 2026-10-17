@@ -75,6 +75,7 @@ interface AuthContextType {
   ) => Promise<{ success: boolean; requiresEmailConfirmation?: boolean; error?: string }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (data: Partial<CustomerProfile>) => Promise<{ success: boolean; error?: string }>;
   refreshProfile: () => Promise<void>;
   fetchCustomerOrders: () => Promise<CustomerOrderSummary[]>;
@@ -310,6 +311,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updatePassword = async (newPassword: string) => {
+    if (!isSupabaseConfigured) {
+      return { success: false, error: "Supabase authentication is not configured in this environment." };
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return { success: false, error: "Password must be at least 6 characters long." };
+    }
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      toast.success("Password updated successfully.");
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Failed to update password." };
+    }
+  };
+
   const updateProfile = async (data: Partial<CustomerProfile>) => {
     if (!user) {
       return { success: false, error: "You must be signed in to update your profile." };
@@ -425,6 +445,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         signOut,
         resetPassword,
+        updatePassword,
         updateProfile,
         refreshProfile,
         fetchCustomerOrders,

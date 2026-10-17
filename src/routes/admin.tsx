@@ -35,6 +35,10 @@ import {
   CreditCard,
   ArrowRight,
   ChevronRight,
+  KeyRound,
+  Mail,
+  Info,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -213,6 +217,8 @@ export function AdminPage() {
   // Staff Roles state (Super Admin only)
   const [rolesList, setRolesList] = useState<AdminRoleUser[]>([]);
   const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesRpcPending, setRolesRpcPending] = useState(false);
+  const [sendingPasswordResetEmail, setSendingPasswordResetEmail] = useState<string | null>(null);
   const [newRoleEmail, setNewRoleEmail] = useState("");
   const [newRoleType, setNewRoleType] = useState<"store_manager" | "super_admin">("store_manager");
   const [assigningRole, setAssigningRole] = useState(false);
@@ -388,20 +394,29 @@ export function AdminPage() {
       const { data, error } = await supabase.rpc("admin_list_roles");
       if (!error && data) {
         setRolesList(data as AdminRoleUser[]);
+        setRolesRpcPending(false);
       } else {
+        if (error && (error.code === "PGRST202" || error.message?.includes("schema cache"))) {
+          setRolesRpcPending(true);
+        }
+
         // Fallback: direct table query if RPC not yet applied
         const { data: directData } = await supabase
           .from("admin_roles")
           .select("user_id, role, created_at");
         if (directData) {
-          setRolesList(
-            directData.map((d: any) => ({
+          const { data: { session: curSess } } = await supabase.auth.getSession();
+          const mapped = directData.map((d: any) => {
+            const isMe = curSess?.user?.id === d.user_id;
+            return {
               user_id: d.user_id,
-              email: d.user_id,
+              email: isMe && curSess?.user?.email ? curSess.user.email : d.user_id,
+              ...(isMe ? { full_name: "Current Super Admin" } : {}),
               role: d.role,
               created_at: d.created_at,
-            }))
-          );
+            };
+          });
+          setRolesList(mapped);
         }
       }
     } catch {
@@ -858,22 +873,37 @@ export function AdminPage() {
   // ==========================================
   const handleAssignRole = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRoleEmail.trim()) {
-      toast.error("Please enter a user email address.");
+    const cleanEmail = newRoleEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      toast.error("Please enter a valid user email address.");
       return;
     }
 
     setAssigningRole(true);
     try {
       const { error } = await supabase.rpc("admin_assign_role", {
-        p_email: newRoleEmail.trim().toLowerCase(),
+        p_email: cleanEmail,
         p_role: newRoleType,
       });
 
       if (error) {
-        toast.error(`Role assignment failed: ${error.message}`);
+        if (error.code === "PGRST202" || error.message?.includes("schema cache")) {
+          setRolesRpcPending(true);
+          toast.error("Database Migration Pending: The admin_assign_role function is not in the schema cache. Please execute migration 20261014010000_role_based_administration.sql in your Supabase SQL Editor.", {
+            duration: 8000,
+          });
+        } else if (error.message?.includes("No user found")) {
+          toast.error(`Staff user not found: ${error.message}`, {
+            description: "The staff member must first register an account at /account or be invited via the Supabase Dashboard.",
+            duration: 8000,
+          });
+        } else if (error.message?.includes("Access Denied")) {
+          toast.error("Permission Denied: Only authorized Super Administrators can assign staff roles.");
+        } else {
+          toast.error(`Role assignment failed: ${error.message}`);
+        }
       } else {
-        toast.success(`Assigned ${newRoleType.replace("_", " ")} to ${newRoleEmail}`);
+        toast.success(`Assigned ${newRoleType.replace("_", " ")} to ${cleanEmail}`);
         setNewRoleEmail("");
         loadRoles();
       }
@@ -881,6 +911,31 @@ export function AdminPage() {
       toast.error(`Error: ${err?.message}`);
     } finally {
       setAssigningRole(false);
+    }
+  };
+
+  const handleSendStaffPasswordSetup = async (targetEmail: string) => {
+    const clean = targetEmail.trim().toLowerCase();
+    if (!clean || !clean.includes("@")) {
+      toast.error("Valid staff email address is required.");
+      return;
+    }
+    setSendingPasswordResetEmail(clean);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(clean, {
+        redirectTo: `${window.location.origin}/account`,
+      });
+      if (error) {
+        toast.error(`Failed to send password setup email: ${error.message}`);
+      } else {
+        toast.success(`Password setup email sent to ${clean}! They can click the link in their inbox to set their private password.`, {
+          duration: 6000,
+        });
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err?.message || "Failed to send password setup link."}`);
+    } finally {
+      setSendingPasswordResetEmail(null);
     }
   };
 
@@ -2347,44 +2402,100 @@ export function AdminPage() {
       {/* TAB 4: STAFF & ROLES MANAGEMENT (SUPER ADMIN ONLY) */}
       {activeTab === "roles" && adminRole === "super_admin" && (
         <div className="mt-6 space-y-6">
-          <div className="rounded-3xl border border-border bg-card p-6 shadow-xs max-w-xl">
-            <div className="flex items-center gap-2">
-              <UserPlus className="size-5 text-primary" />
-              <h2 className="font-display text-lg font-bold text-foreground">Assign Staff Role</h2>
+          {/* Migration Pending Notice */}
+          {rolesRpcPending && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5 shadow-xs">
+              <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                <span>Supabase Migration Pending Execution</span>
+              </div>
+              <p className="leading-relaxed">
+                The role administration functions (<code>admin_assign_role</code>, <code>admin_list_roles</code>) have not yet been executed in your remote Supabase database.
+                To enable staff email resolution and role assignments, run <code>supabase/migrations/20261014010000_role_based_administration.sql</code> in your Supabase SQL Editor.
+              </p>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Grant Store Manager or Super Administrator permissions to a registered user email.
-            </p>
+          )}
 
-            <form onSubmit={handleAssignRole} className="mt-5 space-y-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-foreground">User Email Address *</label>
-                <input
-                  type="email"
-                  required
-                  value={newRoleEmail}
-                  onChange={(e) => setNewRoleEmail(e.target.value)}
-                  placeholder="manager@shipt.campus or student@dhuniversity.edu"
-                  className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                />
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Assign Role Form */}
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-xs">
+              <div className="flex items-center gap-2">
+                <UserPlus className="size-5 text-primary" />
+                <h2 className="font-display text-lg font-bold text-foreground">Assign Staff Role</h2>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Grant Store Manager or Super Administrator permissions to a registered user email.
+              </p>
+
+              <form onSubmit={handleAssignRole} className="mt-5 space-y-4">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">User Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={newRoleEmail}
+                    onChange={(e) => setNewRoleEmail(e.target.value)}
+                    placeholder="manager@shipt.campus or student@dhuniversity.edu"
+                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">Role Permission Level *</label>
+                  <select
+                    value={newRoleType}
+                    onChange={(e) => setNewRoleType(e.target.value as any)}
+                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                  >
+                    <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
+                    <option value="super_admin">Super Administrator (Full System & Role Access)</option>
+                  </select>
+                </div>
+
+                <Button type="submit" variant="hero" disabled={assigningRole} className="h-11 px-6 font-bold text-xs">
+                  {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
+                </Button>
+              </form>
+            </div>
+
+            {/* Staff Onboarding & Password Setup Guide */}
+            <div className="rounded-3xl border border-border bg-card p-6 shadow-xs space-y-4">
+              <div className="flex items-center gap-2">
+                <KeyRound className="size-5 text-primary" />
+                <h3 className="font-display text-base font-bold text-foreground">Staff Onboarding & Password Setup</h3>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                New staff members securely set their own private passwords. Choose either of the two standard workflows:
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2 text-xs">
+                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+                  <span className="font-bold text-foreground flex items-center gap-1.5">
+                    <span className="grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">1</span>
+                    Self-Registration
+                  </span>
+                  <p className="text-muted-foreground leading-normal">
+                    Staff creates an account with their email & password at <code className="text-primary font-mono font-semibold">/account</code>, then the Super Admin assigns their role.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+                  <span className="font-bold text-foreground flex items-center gap-1.5">
+                    <span className="grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">2</span>
+                    Dashboard Invite
+                  </span>
+                  <p className="text-muted-foreground leading-normal">
+                    Invite via Supabase Dashboard (<strong>Auth → Users → Invite User</strong>). The user receives an official email invitation to set their password.
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-foreground">Role Permission Level *</label>
-                <select
-                  value={newRoleType}
-                  onChange={(e) => setNewRoleType(e.target.value as any)}
-                  className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                >
-                  <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
-                  <option value="super_admin">Super Administrator (Full System & Role Access)</option>
-                </select>
+              <div className="pt-1 border-t border-border/60">
+                <p className="text-[11px] text-muted-foreground">
+                  <strong className="text-foreground">Password Recovery / Setup:</strong> You can also trigger an official password setup email for any registered staff member using the "Send Password Link" button in the table below.
+                </p>
               </div>
-
-              <Button type="submit" variant="hero" disabled={assigningRole} className="h-11 px-6 font-bold text-xs">
-                {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
-              </Button>
-            </form>
+            </div>
           </div>
 
           {/* Current Staff List */}
@@ -2404,7 +2515,7 @@ export function AdminPage() {
                     <th className="p-3 font-semibold">Staff Email / ID</th>
                     <th className="p-3 font-semibold">Assigned Role</th>
                     <th className="p-3 font-semibold">Date Added</th>
-                    <th className="p-3 font-semibold text-right">Action</th>
+                    <th className="p-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -2437,18 +2548,39 @@ export function AdminPage() {
                         {r.created_at ? new Date(r.created_at).toLocaleDateString() : "Initial"}
                       </td>
                       <td className="p-3 text-right">
-                        {r.user_id !== session?.user?.id && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRevokeRole(r.user_id, r.role)}
-                            className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                          >
-                            <UserX className="size-3.5 mr-1" />
-                            <span>Revoke</span>
-                          </Button>
-                        )}
+                        <div className="flex items-center justify-end gap-2">
+                          {r.email && r.email.includes("@") && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={sendingPasswordResetEmail === r.email}
+                              onClick={() => handleSendStaffPasswordSetup(r.email)}
+                              className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/10"
+                              title={`Send password setup email to ${r.email}`}
+                            >
+                              {sendingPasswordResetEmail === r.email ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <Mail className="size-3" />
+                              )}
+                              <span>Send Password Link</span>
+                            </Button>
+                          )}
+
+                          {r.user_id !== session?.user?.id && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRevokeRole(r.user_id, r.role)}
+                              className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                            >
+                              <UserX className="size-3.5 mr-1" />
+                              <span>Revoke</span>
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

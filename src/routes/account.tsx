@@ -84,7 +84,7 @@ function getStatusBadge(status: string) {
 }
 
 function AccountPage() {
-  const { user, profile, isLoading, signIn, signUp, signOut, resetPassword, updateProfile, fetchCustomerOrders } =
+  const { user, profile, isLoading, signIn, signUp, signOut, resetPassword, updatePassword, updateProfile, fetchCustomerOrders } =
     useCustomerAuth();
 
   const location = useLocation();
@@ -145,6 +145,12 @@ function AccountPage() {
   const [editBlock, setEditBlock] = useState("");
   const [editRoom, setEditRoom] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Change password state
+  const [changePasswordVal, setChangePasswordVal] = useState("");
+  const [changeConfirmPasswordVal, setChangeConfirmPasswordVal] = useState("");
+  const [updatingPassword, setUpdatingPassword] = useState(false);
+  const [passwordChangeMsg, setPasswordChangeMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Orders state
   const [orders, setOrders] = useState<CustomerOrderSummary[]>([]);
@@ -337,6 +343,30 @@ function AccountPage() {
     setSavingProfile(false);
     if (!res.success) {
       toast.error(res.error || "Could not save details.");
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeMsg(null);
+    if (!changePasswordVal || changePasswordVal.length < 6) {
+      setPasswordChangeMsg({ type: "error", text: "New password must be at least 6 characters." });
+      return;
+    }
+    if (changePasswordVal !== changeConfirmPasswordVal) {
+      setPasswordChangeMsg({ type: "error", text: "Passwords do not match." });
+      return;
+    }
+
+    setUpdatingPassword(true);
+    const res = await updatePassword(changePasswordVal);
+    setUpdatingPassword(false);
+    if (res.success) {
+      setPasswordChangeMsg({ type: "success", text: "Your password has been securely updated." });
+      setChangePasswordVal("");
+      setChangeConfirmPasswordVal("");
+    } else {
+      setPasswordChangeMsg({ type: "error", text: res.error || "Failed to update password." });
     }
   };
 
@@ -1310,6 +1340,65 @@ function AccountPage() {
                   {savingProfile ? <Loader2 className="size-4 animate-spin" /> : "Save Delivery Address"}
                 </Button>
               </div>
+            </form>
+          </div>
+
+          {/* SECURITY & PASSWORD SETUP */}
+          <div className="mt-8 max-w-xl rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
+            <div className="flex items-center gap-2">
+              <KeyRound className="size-5 text-primary" />
+              <h2 className="font-display text-lg font-bold text-foreground">Password & Account Security</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Update your account password. If you were invited as staff, set your private password here.
+            </p>
+
+            {passwordChangeMsg && (
+              <div
+                className={cn(
+                  "mt-4 rounded-xl p-3 text-xs flex items-center gap-2",
+                  passwordChangeMsg.type === "success"
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "bg-destructive/10 text-destructive border border-destructive/20"
+                )}
+              >
+                {passwordChangeMsg.type === "success" ? (
+                  <CheckCircle2 className="size-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="size-4 shrink-0" />
+                )}
+                <span>{passwordChangeMsg.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleUpdatePassword} className="mt-5 space-y-4">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">New Password *</label>
+                <input
+                  type="password"
+                  required
+                  value={changePasswordVal}
+                  onChange={(e) => setChangePasswordVal(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">Confirm New Password *</label>
+                <input
+                  type="password"
+                  required
+                  value={changeConfirmPasswordVal}
+                  onChange={(e) => setChangeConfirmPasswordVal(e.target.value)}
+                  placeholder="Re-enter new password"
+                  className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
+                />
+              </div>
+
+              <Button type="submit" variant="hero" className="h-11 px-6 font-bold text-xs" disabled={updatingPassword}>
+                {updatingPassword ? <Loader2 className="size-4 animate-spin" /> : "Update Password"}
+              </Button>
             </form>
           </div>
         </TabsContent>
