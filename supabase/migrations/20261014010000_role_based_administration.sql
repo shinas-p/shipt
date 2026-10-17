@@ -146,26 +146,39 @@ SET search_path = public, auth
 AS $$
 DECLARE
   v_target_id uuid;
+  v_clean_email text;
 BEGIN
+  -- Security check: strictly Super Admin only
   IF NOT public.is_super_admin() THEN
     RAISE EXCEPTION 'Access Denied: Only Super Administrators can assign staff roles.';
   END IF;
 
+  -- Role boundary check
   IF p_role NOT IN ('super_admin', 'store_manager') THEN
-    RAISE EXCEPTION 'Invalid role specified. Supported roles: super_admin, store_manager';
+    RAISE EXCEPTION 'Invalid role specified: %. Supported roles: super_admin, store_manager', p_role;
   END IF;
 
+  -- Normalize and validate target email
+  v_clean_email := lower(trim(COALESCE(p_email, '')));
+  IF v_clean_email = '' OR position('@' in v_clean_email) = 0 THEN
+    RAISE EXCEPTION 'A valid email address is required.';
+  END IF;
+
+  -- Safe user lookup in auth.users
   SELECT id INTO v_target_id
   FROM auth.users
-  WHERE lower(email) = lower(trim(p_email));
+  WHERE lower(email) = v_clean_email
+  LIMIT 1;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No user found with email "%"', p_email;
+  IF v_target_id IS NULL THEN
+    RAISE EXCEPTION 'No user found with email "%". The user must register an account first.', v_clean_email;
   END IF;
 
+  -- Insert or update role assignment
   INSERT INTO public.admin_roles (user_id, role, created_by, created_at)
   VALUES (v_target_id, p_role, auth.uid(), now())
-  ON CONFLICT (user_id, role) DO NOTHING;
+  ON CONFLICT (user_id, role) DO UPDATE
+    SET created_by = auth.uid(), created_at = now();
 
   RETURN true;
 END;
@@ -208,3 +221,6 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.admin_revoke_role(uuid, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_revoke_role(uuid, text) TO authenticated;
+
+-- Refresh PostgREST schema cache immediately
+NOTIFY pgrst, 'reload schema';

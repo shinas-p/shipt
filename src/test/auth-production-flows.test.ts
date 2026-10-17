@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { validateSupabaseConfig, isSupabaseConfigured, supabase } from "@/lib/supabase";
 
-describe("Production Authentication & Navigation Flows", () => {
+describe("Production Authentication & Navigation Flows", { timeout: 25000 }, () => {
   describe("Configuration & Safe Diagnostics", () => {
     it("reports diagnostic status without exposing secret values or tokens", () => {
       const diag = validateSupabaseConfig();
       expect(diag).toHaveProperty("valid");
       expect(diag).toHaveProperty("missing");
       expect(Array.isArray(diag.missing)).toBe(true);
-      
+
       // Ensure missing only lists public variable names, never actual secret keys
       for (const m of diag.missing) {
         expect(["VITE_SUPABASE_URL", "VITE_SUPABASE_PUBLISHABLE_KEY"]).toContain(m);

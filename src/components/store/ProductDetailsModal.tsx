@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Heart } from "lucide-react";
+import { Heart, ExternalLink } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
@@ -51,6 +52,17 @@ export function ProductDetailsModal() {
               <button type="button" onClick={() => toggleWish(p)} aria-pressed={wished} aria-label="Toggle wishlist" className="grid size-11 place-items-center rounded-full border border-border hover:bg-secondary">
                 <Heart className={cn("size-5", wished && "fill-destructive text-destructive")} />
               </button>
+            </div>
+            <div className="flex items-center justify-between pt-1">
+              <Link
+                to="/product/$productId"
+                params={{ productId: p.id }}
+                onClick={() => setDetail(null)}
+                className="text-xs font-semibold text-primary hover:underline inline-flex items-center gap-1"
+              >
+                <span>View Full Product Page & Reviews</span>
+                <ExternalLink className="size-3" />
+              </Link>
             </div>
             <p className="text-xs text-muted-foreground">Demo product · sample price</p>
           </div>

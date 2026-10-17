@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Heart } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { Product } from "@/lib/types";
 import { formatINR } from "@/data/products";
 import { useStore } from "@/lib/store";
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export function ProductCard({ product: p }: { product: Product }) {
   const navigate = useNavigate();
-  const { qtyOf, add, wishlist, toggleWish, setDetail } = useStore();
+  const { qtyOf, add, wishlist, toggleWish } = useStore();
   const [isNavigating, setIsNavigating] = useState(false);
   const qty = qtyOf(p.id);
   const wished = wishlist.includes(p.id);
@@ -33,7 +33,12 @@ export function ProductCard({ product: p }: { product: Product }) {
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft transition duration-300 hover:-translate-y-1 hover:shadow-lift">
-      <button type="button" onClick={() => setDetail(p)} className="relative block aspect-square overflow-hidden bg-muted" aria-label={`View ${p.name}`}>
+      <Link
+        to="/product/$productId"
+        params={{ productId: p.id }}
+        className="relative block aspect-square overflow-hidden bg-muted cursor-pointer"
+        aria-label={`View ${p.name}`}
+      >
         <img
           src={p.image}
           alt={p.name}
@@ -50,13 +55,19 @@ export function ProductCard({ product: p }: { product: Product }) {
           {discount > 0 && <span className="rounded-full bg-lime px-2 py-0.5 text-[11px] font-bold text-lime-foreground">{discount}% off*</span>}
         </div>
         {out && <span className="absolute inset-x-0 bottom-3 mx-auto w-fit rounded-full bg-foreground/85 px-3 py-1 text-xs font-semibold text-background">Out of stock</span>}
-      </button>
+      </Link>
       <button type="button" onClick={() => toggleWish(p)} aria-pressed={wished} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} className="absolute right-2 top-2 grid size-9 place-items-center rounded-full bg-card/90 shadow-soft backdrop-blur transition hover:scale-110">
         <Heart className={cn("size-4", wished ? "fill-destructive text-destructive" : "text-foreground")} />
       </button>
       <div className="flex flex-1 flex-col gap-1 p-3 sm:p-4">
         <p className="text-xs text-muted-foreground">{p.size}</p>
-        <h3 className="line-clamp-2 font-sans text-sm font-semibold leading-snug sm:text-base">{p.name}</h3>
+        <Link
+          to="/product/$productId"
+          params={{ productId: p.id }}
+          className="line-clamp-2 font-sans text-sm font-semibold leading-snug sm:text-base hover:text-primary transition"
+        >
+          {p.name}
+        </Link>
         <p className={cn("text-xs font-medium", out ? "text-destructive" : p.stock <= 5 ? "text-warn" : "text-primary")}>
           {out ? "Currently unavailable" : p.stock <= 5 ? `Only ${p.stock} left` : "In stock"}
         </p>
