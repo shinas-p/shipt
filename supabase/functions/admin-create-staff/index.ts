@@ -48,6 +48,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+
     // 2. Validate environment configuration
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -69,7 +71,7 @@ Deno.serve(async (req: Request) => {
     const {
       data: { user: callerUser },
       error: callerAuthError,
-    } = await callerClient.auth.getUser();
+    } = await callerClient.auth.getUser(token);
 
     if (callerAuthError || !callerUser) {
       return new Response(
@@ -159,6 +161,21 @@ Deno.serve(async (req: Request) => {
             message: `User "${cleanEmail}" is already registered with Shipt. Use the "Assign Staff Role" action to grant them staff permissions without creating a duplicate account.`,
           }),
           { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const isRateLimit =
+        msg.toLowerCase().includes("rate limit") ||
+        msg.toLowerCase().includes("over_email_send_rate_limit") ||
+        (inviteError as any).status === 429;
+
+      if (isRateLimit) {
+        return new Response(
+          JSON.stringify({
+            error: "Email delivery rate limit reached. The Supabase default email service limits invitations to 3-4 emails per hour. Please wait a short while or configure custom SMTP in your Supabase Dashboard.",
+            isRateLimit: true,
+          }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 

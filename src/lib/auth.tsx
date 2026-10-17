@@ -141,15 +141,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initSession();
 
+    // Ensure staff invitation or password recovery tokens route immediately to /account password setup
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash || "";
+      const search = window.location.search || "";
+      const isStaffInviteOrRecovery =
+        hash.includes("type=invite") ||
+        hash.includes("type=recovery") ||
+        search.includes("type=invite") ||
+        search.includes("type=recovery");
+
+      if (isStaffInviteOrRecovery && window.location.pathname !== "/account") {
+        window.location.replace(`/account?tab=profile&setup_password=true${hash}`);
+      }
+    }
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
         await fetchProfile(newSession.user.id);
       } else {
         setProfile(null);
+      }
+
+      // If user arrived via a password recovery or staff invite link, ensure they are on the password setup card
+      if (
+        (event === "PASSWORD_RECOVERY" || event === "USER_UPDATED") &&
+        typeof window !== "undefined" &&
+        window.location.pathname !== "/account"
+      ) {
+        window.location.replace("/account?tab=profile&setup_password=true");
       }
     });
 

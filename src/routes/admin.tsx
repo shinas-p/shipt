@@ -472,7 +472,13 @@ export function AdminPage() {
       });
 
       if (error) {
-        setLoginError(error.message);
+        if (error.message?.toLowerCase().includes("invalid login credentials")) {
+          setLoginError(
+            "Invalid email or password. If you are newly invited staff, please check your inbox for the invitation email to set your password, or visit /account to set up your password."
+          );
+        } else {
+          setLoginError(error.message);
+        }
         setIsLoggingIn(false);
         return;
       }
@@ -898,7 +904,7 @@ export function AdminPage() {
     setExistingAccountConflict(null);
 
     try {
-      const redirectUrl = `${window.location.origin}/account`;
+      const redirectUrl = `${window.location.origin}/account?tab=profile&setup_password=true`;
       const { data, error } = await supabase.functions.invoke("admin-create-staff", {
         body: {
           email: cleanEmail,
@@ -911,12 +917,16 @@ export function AdminPage() {
       if (error) {
         let errorMsg = error.message;
         let isConflict = false;
+        let isRateLimit = false;
 
         try {
           if ((error as any).context && typeof (error as any).context.json === "function") {
             const errBody = await (error as any).context.json();
             if (errBody?.alreadyExists) {
               isConflict = true;
+            }
+            if (errBody?.isRateLimit) {
+              isRateLimit = true;
             }
             if (errBody?.error) {
               errorMsg = errBody.error;
@@ -936,6 +946,17 @@ export function AdminPage() {
             `Account already exists: "${cleanEmail}" is already registered. You can directly assign them the ${createStaffRole.replace("_", " ")} role below.`
           );
           toast.info(`"${cleanEmail}" already has an account. Click "Assign Role to Existing Account" to grant staff access.`);
+        } else if (
+          isRateLimit ||
+          errorMsg.toLowerCase().includes("rate limit") ||
+          errorMsg.toLowerCase().includes("over_email_send_rate_limit")
+        ) {
+          setCreateStaffError(
+            "Supabase email delivery rate limit reached (3-4 emails/hr on default Supabase SMTP). Please wait a short while or configure custom SMTP in your Supabase Dashboard."
+          );
+          toast.error("Email delivery rate limit reached. Please wait or set up custom SMTP.", {
+            duration: 8000,
+          });
         } else if (
           errorMsg.includes("Failed to send a request") ||
           errorMsg.includes("FunctionsFetchError") ||
@@ -1048,10 +1069,16 @@ export function AdminPage() {
     setSendingPasswordResetEmail(clean);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(clean, {
-        redirectTo: `${window.location.origin}/account`,
+        redirectTo: `${window.location.origin}/account?tab=profile&setup_password=true`,
       });
       if (error) {
-        toast.error(`Failed to send password setup email: ${error.message}`);
+        if (error.message?.toLowerCase().includes("rate limit") || (error as any).status === 429) {
+          toast.error("Email Rate Limit: Supabase default email limits sending to 3-4 emails/hr. Please wait a short while or configure custom SMTP in your Supabase Dashboard.", {
+            duration: 8000,
+          });
+        } else {
+          toast.error(`Failed to send password setup email: ${error.message}`);
+        }
       } else {
         toast.success(`Password setup email sent to ${clean}! They can click the link in their inbox to set their private password.`, {
           duration: 6000,
@@ -1170,6 +1197,19 @@ export function AdminPage() {
               )}
             </Button>
           </form>
+
+          <div className="mt-6 border-t border-border/60 pt-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              Invited as staff?{" "}
+              <Link
+                to="/account"
+                search={{ tab: "profile", setup_password: "true" }}
+                className="font-semibold text-primary hover:underline"
+              >
+                Set up your password at My Account
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     );
