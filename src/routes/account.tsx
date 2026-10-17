@@ -94,13 +94,33 @@ function AccountPage() {
   // Customer dashboard active tab: "orders" | "profile"
   const [activeTab, setActiveTab] = useState<string>("orders");
   const [signUpConfirmationEmail, setSignUpConfirmationEmail] = useState<string | null>(null);
+  const [isStaffInviteWelcome, setIsStaffInviteWelcome] = useState(false);
 
-  // Sync active tab with URL search parameter reactively
+  // Sync active tab with URL search parameter reactively and detect staff invitation / recovery links
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get("tab");
-      if (tabParam === "orders" || tabParam === "profile") {
+      const hash = window.location.hash || "";
+      const search = window.location.search || "";
+
+      const isInviteOrRecovery =
+        hash.includes("type=invite") ||
+        hash.includes("type=recovery") ||
+        search.includes("type=invite") ||
+        search.includes("type=recovery") ||
+        search.includes("setup_password=true");
+
+      if (isInviteOrRecovery) {
+        setActiveTab("profile");
+        setIsStaffInviteWelcome(true);
+        setTimeout(() => {
+          const el = document.getElementById("password-security-section");
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth" });
+          }
+        }, 500);
+      } else if (tabParam === "orders" || tabParam === "profile") {
         setActiveTab(tabParam);
       }
     }
@@ -1344,7 +1364,7 @@ function AccountPage() {
           </div>
 
           {/* SECURITY & PASSWORD SETUP */}
-          <div className="mt-8 max-w-xl rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
+          <div id="password-security-section" className="mt-8 max-w-xl rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
             <div className="flex items-center gap-2">
               <KeyRound className="size-5 text-primary" />
               <h2 className="font-display text-lg font-bold text-foreground">Password & Account Security</h2>
@@ -1353,21 +1373,45 @@ function AccountPage() {
               Update your account password. If you were invited as staff, set your private password here.
             </p>
 
+            {isStaffInviteWelcome && (
+              <div className="mt-4 rounded-2xl border border-primary/30 bg-primary/10 p-4 text-xs text-foreground space-y-1">
+                <div className="flex items-center gap-2 font-bold text-primary">
+                  <ShieldCheck className="size-4 shrink-0" />
+                  <span>Welcome to Shipt Staff Onboarding!</span>
+                </div>
+                <p className="text-muted-foreground leading-relaxed">
+                  Your invitation has been verified. Please choose and confirm your new password below. Once set, you can sign in directly to the Staff & Admin Portal at <Link to="/admin" className="font-bold text-primary hover:underline">/admin</Link>.
+                </p>
+              </div>
+            )}
+
             {passwordChangeMsg && (
               <div
                 className={cn(
-                  "mt-4 rounded-xl p-3 text-xs flex items-center gap-2",
+                  "mt-4 rounded-xl p-3 text-xs flex flex-col gap-2",
                   passwordChangeMsg.type === "success"
                     ? "bg-primary/10 text-primary border border-primary/20"
                     : "bg-destructive/10 text-destructive border border-destructive/20"
                 )}
               >
-                {passwordChangeMsg.type === "success" ? (
-                  <CheckCircle2 className="size-4 shrink-0" />
-                ) : (
-                  <AlertCircle className="size-4 shrink-0" />
+                <div className="flex items-center gap-2">
+                  {passwordChangeMsg.type === "success" ? (
+                    <CheckCircle2 className="size-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="size-4 shrink-0" />
+                  )}
+                  <span>{passwordChangeMsg.text}</span>
+                </div>
+                {passwordChangeMsg.type === "success" && (
+                  <div className="pt-1">
+                    <Button asChild size="sm" variant="hero" className="h-8 text-xs font-bold gap-1.5">
+                      <Link to="/admin">
+                        <span>Go to Staff & Admin Portal</span>
+                        <ArrowRight className="size-3" />
+                      </Link>
+                    </Button>
+                  </div>
                 )}
-                <span>{passwordChangeMsg.text}</span>
               </div>
             )}
 

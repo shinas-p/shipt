@@ -223,6 +223,18 @@ export function AdminPage() {
   const [newRoleType, setNewRoleType] = useState<"store_manager" | "super_admin">("store_manager");
   const [assigningRole, setAssigningRole] = useState(false);
 
+  // Direct Staff Account Creation (Edge Function)
+  const [createStaffName, setCreateStaffName] = useState("");
+  const [createStaffEmail, setCreateStaffEmail] = useState("");
+  const [createStaffRole, setCreateStaffRole] = useState<"store_manager" | "super_admin">("store_manager");
+  const [creatingStaff, setCreatingStaff] = useState(false);
+  const [createStaffSuccess, setCreateStaffSuccess] = useState<string | null>(null);
+  const [createStaffError, setCreateStaffError] = useState<string | null>(null);
+  const [existingAccountConflict, setExistingAccountConflict] = useState<{
+    email: string;
+    role: "store_manager" | "super_admin";
+  } | null>(null);
+
   // Check auth and admin permissions
   const checkAuth = useCallback(async () => {
     setAuthLoading(true);
@@ -869,8 +881,121 @@ export function AdminPage() {
   };
 
   // ==========================================
-  // STAFF ROLE MANAGEMENT (SUPER ADMIN)
+  // STAFF CREATION & ROLE MANAGEMENT (SUPER ADMIN)
   // ==========================================
+  const handleCreateStaffAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = createStaffEmail.trim().toLowerCase();
+    const cleanName = createStaffName.trim();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      toast.error("Please enter a valid staff email address.");
+      return;
+    }
+
+    setCreatingStaff(true);
+    setCreateStaffError(null);
+    setCreateStaffSuccess(null);
+    setExistingAccountConflict(null);
+
+    try {
+      const redirectUrl = `${window.location.origin}/account`;
+      const { data, error } = await supabase.functions.invoke("admin-create-staff", {
+        body: {
+          email: cleanEmail,
+          fullName: cleanName,
+          role: createStaffRole,
+          redirectTo: redirectUrl,
+        },
+      });
+
+      if (error) {
+        let errorMsg = error.message;
+        let isConflict = false;
+
+        try {
+          if ((error as any).context && typeof (error as any).context.json === "function") {
+            const errBody = await (error as any).context.json();
+            if (errBody?.alreadyExists) {
+              isConflict = true;
+            }
+            if (errBody?.error) {
+              errorMsg = errBody.error;
+            }
+          }
+        } catch {
+          // ignore parsing error
+        }
+
+        if (
+          isConflict ||
+          errorMsg.toLowerCase().includes("already registered") ||
+          errorMsg.toLowerCase().includes("already exists")
+        ) {
+          setExistingAccountConflict({ email: cleanEmail, role: createStaffRole });
+          setCreateStaffError(
+            `Account already exists: "${cleanEmail}" is already registered. You can directly assign them the ${createStaffRole.replace("_", " ")} role below.`
+          );
+          toast.info(`"${cleanEmail}" already has an account. Click "Assign Role to Existing Account" to grant staff access.`);
+        } else if (
+          errorMsg.includes("Failed to send a request") ||
+          errorMsg.includes("FunctionsFetchError") ||
+          errorMsg.includes("404")
+        ) {
+          setCreateStaffError(
+            "Edge Function Pending Deployment: 'admin-create-staff' is not yet deployed to your remote Supabase project. Deploy the Edge Function using the Supabase CLI/Dashboard or use 'Assign Staff Role' below for registered users."
+          );
+          toast.error("Edge Function not yet deployed remotely.");
+        } else {
+          setCreateStaffError(errorMsg);
+          toast.error(`Staff account creation failed: ${errorMsg}`);
+        }
+      } else if (data?.alreadyExists) {
+        setExistingAccountConflict({ email: cleanEmail, role: createStaffRole });
+        setCreateStaffError(data.error || "User already exists.");
+        toast.info(data.message || "User already registered. Use role assignment.");
+      } else {
+        toast.success(data?.message || `Staff account created! Invitation sent to ${cleanEmail}.`, {
+          duration: 6000,
+        });
+        setCreateStaffSuccess(
+          `Successfully created staff account for ${cleanEmail} (${createStaffRole.replace("_", " ")}). An official invitation email has been sent!`
+        );
+        setCreateStaffEmail("");
+        setCreateStaffName("");
+        loadRoles();
+      }
+    } catch (err: any) {
+      setCreateStaffError(err?.message || "Failed to invoke staff creation function.");
+      toast.error(`Error: ${err?.message}`);
+    } finally {
+      setCreatingStaff(false);
+    }
+  };
+
+  const handleAssignExistingAfterConflict = async (targetEmail: string, targetRole: "store_manager" | "super_admin") => {
+    setAssigningRole(true);
+    try {
+      const { error } = await supabase.rpc("admin_assign_role", {
+        p_email: targetEmail,
+        p_role: targetRole,
+      });
+
+      if (error) {
+        toast.error(`Role assignment failed: ${error.message}`);
+      } else {
+        toast.success(`Assigned ${targetRole.replace("_", " ")} role to existing account ${targetEmail}!`);
+        setExistingAccountConflict(null);
+        setCreateStaffError(null);
+        setCreateStaffSuccess(`Successfully assigned ${targetRole.replace("_", " ")} to ${targetEmail}.`);
+        loadRoles();
+      }
+    } catch (err: any) {
+      toast.error(`Error: ${err?.message}`);
+    } finally {
+      setAssigningRole(false);
+    }
+  };
+
   const handleAssignRole = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = newRoleEmail.trim().toLowerCase();
@@ -2417,34 +2542,102 @@ export function AdminPage() {
           )}
 
           <div className="grid gap-6 lg:grid-cols-2">
-            {/* Assign Role Form */}
-            <div className="rounded-3xl border border-border bg-card p-6 shadow-xs">
+            {/* 1. Direct Staff Account Creation Form */}
+            <div className="rounded-3xl border border-primary/20 bg-card p-6 shadow-xs relative overflow-hidden">
               <div className="flex items-center gap-2">
                 <UserPlus className="size-5 text-primary" />
-                <h2 className="font-display text-lg font-bold text-foreground">Assign Staff Role</h2>
+                <h2 className="font-display text-lg font-bold text-foreground">Create Staff Account</h2>
+                <Badge variant="outline" className="ml-auto text-[10px] font-bold border-primary/30 text-primary">
+                  Direct Onboard
+                </Badge>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Grant Store Manager or Super Administrator permissions to a registered user email.
+              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                Directly onboard a new Store Manager or Super Admin without prior self-registration. An official invitation and secure password setup link will be emailed to them.
               </p>
 
-              <form onSubmit={handleAssignRole} className="mt-5 space-y-4">
+              {createStaffSuccess && (
+                <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
+                  <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
+                  <span className="leading-relaxed">{createStaffSuccess}</span>
+                </div>
+              )}
+
+              {createStaffError && !existingAccountConflict && (
+                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{createStaffError}</span>
+                </div>
+              )}
+
+              {existingAccountConflict && (
+                <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                    <span>Existing User Account Detected</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    <strong>{existingAccountConflict.email}</strong> is already registered in Shipt Auth. To protect their account from being overwritten, assign their administrative role directly:
+                  </p>
+                  <Button
+                    type="button"
+                    variant="hero"
+                    size="sm"
+                    disabled={assigningRole}
+                    onClick={() =>
+                      handleAssignExistingAfterConflict(
+                        existingAccountConflict.email,
+                        existingAccountConflict.role
+                      )
+                    }
+                    className="h-8 text-xs font-bold gap-1.5"
+                  >
+                    {assigningRole ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="size-3.5" />
+                    )}
+                    <span>
+                      Assign {existingAccountConflict.role.replace("_", " ")} Role Now
+                    </span>
+                  </Button>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateStaffAccount} className="mt-5 space-y-4">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">User Email Address *</label>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Staff Full Name (Optional)
+                  </label>
                   <input
-                    type="email"
-                    required
-                    value={newRoleEmail}
-                    onChange={(e) => setNewRoleEmail(e.target.value)}
-                    placeholder="manager@shipt.campus or student@dhuniversity.edu"
+                    type="text"
+                    value={createStaffName}
+                    onChange={(e) => setCreateStaffName(e.target.value)}
+                    placeholder="e.g. Rahul Sharma or Priya Patel"
                     className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Role Permission Level *</label>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Staff Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={createStaffEmail}
+                    onChange={(e) => setCreateStaffEmail(e.target.value)}
+                    placeholder="manager@shipt.campus or faculty@university.edu"
+                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Role Permission Level *
+                  </label>
                   <select
-                    value={newRoleType}
-                    onChange={(e) => setNewRoleType(e.target.value as any)}
+                    value={createStaffRole}
+                    onChange={(e) => setCreateStaffRole(e.target.value as any)}
                     className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                   >
                     <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
@@ -2452,47 +2645,107 @@ export function AdminPage() {
                   </select>
                 </div>
 
-                <Button type="submit" variant="hero" disabled={assigningRole} className="h-11 px-6 font-bold text-xs">
-                  {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
+                <Button
+                  type="submit"
+                  variant="hero"
+                  disabled={creatingStaff}
+                  className="h-11 px-6 font-bold text-xs gap-1.5 w-full sm:w-auto"
+                >
+                  {creatingStaff ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Creating Staff Account...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="size-4" />
+                      <span>Create Staff Account</span>
+                    </>
+                  )}
                 </Button>
               </form>
             </div>
 
-            {/* Staff Onboarding & Password Setup Guide */}
-            <div className="rounded-3xl border border-border bg-card p-6 shadow-xs space-y-4">
-              <div className="flex items-center gap-2">
-                <KeyRound className="size-5 text-primary" />
-                <h3 className="font-display text-base font-bold text-foreground">Staff Onboarding & Password Setup</h3>
-              </div>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                New staff members securely set their own private passwords. Choose either of the two standard workflows:
-              </p>
+            {/* Right Column: Existing User Role Assignment & Setup Guide */}
+            <div className="space-y-6">
+              {/* 2. Assign Role to Already Registered Account */}
+              <div className="rounded-3xl border border-border bg-card p-6 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="size-5 text-primary" />
+                  <h3 className="font-display text-base font-bold text-foreground">
+                    Assign Role to Existing Account
+                  </h3>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Grant Store Manager or Super Administrator permissions to a user who already has a registered Shipt account.
+                </p>
 
-              <div className="grid gap-3 sm:grid-cols-2 text-xs">
-                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
-                  <span className="font-bold text-foreground flex items-center gap-1.5">
-                    <span className="grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">1</span>
-                    Self-Registration
-                  </span>
-                  <p className="text-muted-foreground leading-normal">
-                    Staff creates an account with their email & password at <code className="text-primary font-mono font-semibold">/account</code>, then the Super Admin assigns their role.
-                  </p>
+                <form onSubmit={handleAssignRole} className="mt-4 space-y-3.5">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Registered User Email *</label>
+                    <input
+                      type="email"
+                      required
+                      value={newRoleEmail}
+                      onChange={(e) => setNewRoleEmail(e.target.value)}
+                      placeholder="student@dhuniversity.edu"
+                      className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Role Level *</label>
+                    <select
+                      value={newRoleType}
+                      onChange={(e) => setNewRoleType(e.target.value as any)}
+                      className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                    >
+                      <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
+                      <option value="super_admin">Super Administrator (Full System & Role Access)</option>
+                    </select>
+                  </div>
+
+                  <Button type="submit" variant="outline" disabled={assigningRole} className="h-10 px-5 font-bold text-xs">
+                    {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
+                  </Button>
+                </form>
+              </div>
+
+              {/* 3. Staff Onboarding & Password Setup Guide */}
+              <div className="rounded-3xl border border-border bg-card p-6 shadow-xs space-y-3.5">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="size-5 text-primary" />
+                  <h3 className="font-display text-base font-bold text-foreground">Staff Onboarding & Password Guide</h3>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  How newly created staff set their passwords and access the portal:
+                </p>
+
+                <div className="space-y-2.5 text-xs">
+                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">1</span>
+                    <p className="text-muted-foreground">
+                      <strong className="text-foreground">Official Invitation Email:</strong> The newly created staff member receives a secure invitation link from Supabase Auth.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">2</span>
+                    <p className="text-muted-foreground">
+                      <strong className="text-foreground">Private Password Setup:</strong> Clicking the link opens <code className="text-primary font-mono font-semibold">/account</code>, where they choose their secure password.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">3</span>
+                    <p className="text-muted-foreground">
+                      <strong className="text-foreground">Immediate Portal Access:</strong> Once saved, they log in at <code className="text-primary font-mono font-semibold">/admin</code> with their assigned role permissions.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
-                  <span className="font-bold text-foreground flex items-center gap-1.5">
-                    <span className="grid size-4 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold">2</span>
-                    Dashboard Invite
-                  </span>
-                  <p className="text-muted-foreground leading-normal">
-                    Invite via Supabase Dashboard (<strong>Auth → Users → Invite User</strong>). The user receives an official email invitation to set their password.
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-1 border-t border-border/60">
-                <p className="text-[11px] text-muted-foreground">
-                  <strong className="text-foreground">Password Recovery / Setup:</strong> You can also trigger an official password setup email for any registered staff member using the "Send Password Link" button in the table below.
+                <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+                  <strong className="text-foreground">Resend Setup Link:</strong> You can resend a password setup email to any staff member using the "Send Password Link" button in the table below.
                 </p>
               </div>
             </div>
@@ -2512,7 +2765,7 @@ export function AdminPage() {
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
                   <tr>
-                    <th className="p-3 font-semibold">Staff Email / ID</th>
+                    <th className="p-3 font-semibold">Staff Member</th>
                     <th className="p-3 font-semibold">Assigned Role</th>
                     <th className="p-3 font-semibold">Date Added</th>
                     <th className="p-3 font-semibold text-right">Actions</th>
@@ -2523,9 +2776,14 @@ export function AdminPage() {
                     <tr key={`${r.user_id}-${r.role}`} className="hover:bg-secondary/20">
                       <td className="p-3 font-medium text-foreground">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono">{r.email || r.user_id}</span>
+                          <div>
+                            {r.full_name && (
+                              <div className="font-semibold text-foreground">{r.full_name}</div>
+                            )}
+                            <div className="font-mono text-[11px] text-muted-foreground">{r.email || r.user_id}</div>
+                          </div>
                           {r.user_id === session?.user?.id && (
-                            <Badge variant="outline" className="text-[10px] border-primary/30 text-primary">
+                            <Badge variant="outline" className="text-[10px] border-primary/30 text-primary shrink-0">
                               You
                             </Badge>
                           )}
