@@ -18,6 +18,7 @@ import { Header } from "@/components/store/Header";
 import { Footer } from "@/components/store/Footer";
 import { CartDrawer } from "@/components/store/CartDrawer";
 import { ProductDetailsModal } from "@/components/store/ProductDetailsModal";
+import { OpeningLogoAnimation } from "@/components/store/OpeningLogoAnimation";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -127,6 +128,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <StoreProvider>
+          <OpeningLogoAnimation />
           <Header />
           <main className="overflow-x-hidden">
             <Outlet />
