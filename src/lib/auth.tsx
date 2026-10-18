@@ -141,17 +141,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initSession();
 
-    // Ensure staff invitation or password recovery tokens route immediately to /account password setup
+    // Route invitation and recovery tokens to their dedicated secure handlers
     if (typeof window !== "undefined") {
       const hash = window.location.hash || "";
       const search = window.location.search || "";
-      const isStaffInviteOrRecovery =
-        hash.includes("type=invite") ||
-        hash.includes("type=recovery") ||
-        search.includes("type=invite") ||
-        search.includes("type=recovery");
+      const isStaffInvite = hash.includes("type=invite") || search.includes("type=invite");
+      const isPasswordRecovery = hash.includes("type=recovery") || search.includes("type=recovery");
 
-      if (isStaffInviteOrRecovery && window.location.pathname !== "/account") {
+      if (isStaffInvite && window.location.pathname !== "/accept-invitation") {
+        window.location.replace(`/accept-invitation${search}${hash}`);
+      } else if (
+        isPasswordRecovery &&
+        window.location.pathname !== "/account" &&
+        window.location.pathname !== "/accept-invitation"
+      ) {
         window.location.replace(`/account?tab=profile&setup_password=true${hash}`);
       }
     }
@@ -167,11 +170,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
       }
 
-      // If user arrived via a password recovery or staff invite link, ensure they are on the password setup card
+      // If user arrived via password recovery, ensure they are on the password setup card (do not redirect away from /accept-invitation)
       if (
         (event === "PASSWORD_RECOVERY" || event === "USER_UPDATED") &&
         typeof window !== "undefined" &&
-        window.location.pathname !== "/account"
+        window.location.pathname !== "/account" &&
+        window.location.pathname !== "/accept-invitation"
       ) {
         window.location.replace("/account?tab=profile&setup_password=true");
       }

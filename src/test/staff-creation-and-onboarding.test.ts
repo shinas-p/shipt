@@ -131,11 +131,24 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
         role: requestedRole as any,
       };
 
+      // Canonical production redirect logic mirroring Edge Function
+      let canonicalRedirect = "https://shiptmart.vercel.app/accept-invitation";
+      if (typeof payload.redirectTo === "string" && payload.redirectTo.startsWith("http")) {
+        try {
+          const parsed = new URL(payload.redirectTo);
+          if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+            canonicalRedirect = `${parsed.origin}/accept-invitation`;
+          }
+        } catch {
+          // Fall back to canonical production URL
+        }
+      }
+
       this.users.set(cleanEmail, newUser);
       this.sentEmails.push({
         to: cleanEmail,
         type: "invite",
-        redirectTo: payload.redirectTo || "https://shiptmart.vercel.app/account",
+        redirectTo: canonicalRedirect,
       });
 
       // 6. Assign requested role with rollback guard
@@ -412,6 +425,115 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
       // Case 4: Staff member created with whitespace-only name
       expect(renderGreeting({ full_name: "   " }))
         .toBe("Hello there,");
+    });
+  });
+
+  describe("Shipt /accept-invitation & Canonical Redirect Enforcement", () => {
+    it("enforces canonical production redirect and never forwards protected Vercel preview deployment URLs", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      // Super Admin creates staff from a protected Vercel preview deployment
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "staff.preview@shipt.campus",
+        fullName: "Preview Staff",
+        role: "store_manager",
+        redirectTo: "https://shipt-shinas-projects-24b0b614.vercel.app/accept-invitation",
+      });
+
+      expect(res.status).toBe(200);
+      const sent = service.sentEmails.find((e) => e.to === "staff.preview@shipt.campus");
+      expect(sent).toBeDefined();
+      // MUST NOT contain protected preview domain
+      expect(sent?.redirectTo).not.toContain("shipt-shinas-projects-24b0b614.vercel.app");
+      // MUST point to canonical public production domain
+      expect(sent?.redirectTo).toBe("https://shiptmart.vercel.app/accept-invitation");
+    });
+
+    it("allows localhost redirect for local development and testing", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "staff.local@shipt.campus",
+        fullName: "Local Staff",
+        role: "store_manager",
+        redirectTo: "http://localhost:5173/accept-invitation",
+      });
+
+      expect(res.status).toBe(200);
+      const sent = service.sentEmails.find((e) => e.to === "staff.local@shipt.campus");
+      expect(sent?.redirectTo).toBe("http://localhost:5173/accept-invitation");
+    });
+
+    it("enforces password validation rules on /accept-invitation", () => {
+      const validateStaffPassword = (password: string, confirm: string) => {
+        const isMinLength = password.length >= 8;
+        const isMatch = password.length > 0 && password === confirm;
+        if (!isMinLength) {
+          return { valid: false, error: "Password must be at least 8 characters long." };
+        }
+        if (!isMatch) {
+          return { valid: false, error: "Passwords do not match. Please verify both fields." };
+        }
+        return { valid: true };
+      };
+
+      // Too short
+      expect(validateStaffPassword("Pass1!", "Pass1!").valid).toBe(false);
+      expect(validateStaffPassword("Pass1!", "Pass1!").error).toContain("8 characters");
+
+      // Mismatched
+      expect(validateStaffPassword("StrongPassword123!", "MismatchPassword123!").valid).toBe(false);
+      expect(validateStaffPassword("StrongPassword123!", "MismatchPassword123!").error).toContain("do not match");
+
+      // Valid
+      expect(validateStaffPassword("ShiptStaff2026!", "ShiptStaff2026!").valid).toBe(true);
+    });
+
+    it("identifies expired or invalid invitation error tokens accurately", () => {
+      const parseInvitationError = (errCode: string | null, errDesc: string | null) => {
+        if (errCode === "otp_expired" || errDesc?.toLowerCase().includes("expired")) {
+          return "This staff invitation link has expired. Invitations are single-use and time-sensitive for security.";
+        }
+        if (errCode || errDesc) {
+          return "Invalid or unrecognized invitation link.";
+        }
+        return null;
+      };
+
+      expect(parseInvitationError("otp_expired", "Token has expired")).toContain("has expired");
+      expect(parseInvitationError("access_denied", "Unauthorized request")).toContain("Invalid or unrecognized");
+      expect(parseInvitationError(null, null)).toBeNull();
+    });
+
+    it("verifies the /accept-invitation route source file exists and contains essential security elements", () => {
+      const routePath = path.resolve(__dirname, "../routes/accept-invitation.tsx");
+      expect(fs.existsSync(routePath)).toBe(true);
+
+      const code = fs.readFileSync(routePath, "utf-8");
+      // Check route definition
+      expect(code).toContain('createFileRoute("/accept-invitation")');
+      // Check brand presence
+      expect(code).toContain("BRAND_NAME");
+      expect(code).toContain("Activate Staff Account");
+      // Check password controls
+      expect(code).toContain("showPassword");
+      expect(code).toContain("showConfirmPassword");
+      // Check Supabase updateUser
+      expect(code).toContain("updateUser");
+      // Check role verification RPC
+      expect(code).toContain("is_admin");
+      // Check contact fallback for expired links
+      expect(code).toContain("sshinasbin@gmail.com");
+    });
+
+    it("verifies auth.tsx routes staff invitations to /accept-invitation and protects against /account redirection", () => {
+      const authPath = path.resolve(__dirname, "../lib/auth.tsx");
+      const code = fs.readFileSync(authPath, "utf-8");
+
+      expect(code).toContain('window.location.pathname !== "/accept-invitation"');
+      expect(code).toContain("/accept-invitation");
     });
   });
 });

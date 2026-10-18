@@ -474,7 +474,7 @@ export function AdminPage() {
       if (error) {
         if (error.message?.toLowerCase().includes("invalid login credentials")) {
           setLoginError(
-            "Invalid email or password. If you are newly invited staff, please check your inbox for the invitation email to set your password, or visit /account to set up your password."
+            "Invalid email or password. If you are newly invited staff, please check your inbox for the invitation email to activate your account, or visit /accept-invitation to set your password."
           );
         } else {
           setLoginError(error.message);
@@ -904,7 +904,11 @@ export function AdminPage() {
     setExistingAccountConflict(null);
 
     try {
-      const redirectUrl = `${window.location.origin}/account?tab=profile&setup_password=true`;
+      const isLocalhost =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      const redirectOrigin = isLocalhost ? window.location.origin : "https://shiptmart.vercel.app";
+      const redirectUrl = `${redirectOrigin}/accept-invitation`;
       const { data, error } = await supabase.functions.invoke("admin-create-staff", {
         body: {
           email: cleanEmail,
@@ -1070,8 +1074,13 @@ export function AdminPage() {
     }
     setSendingPasswordResetEmail(clean);
     try {
+      const isLocalhost =
+        typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      const redirectOrigin = isLocalhost ? window.location.origin : "https://shiptmart.vercel.app";
+      const redirectUrl = `${redirectOrigin}/accept-invitation`;
       const { error } = await supabase.auth.resetPasswordForEmail(clean, {
-        redirectTo: `${window.location.origin}/account?tab=profile&setup_password=true`,
+        redirectTo: redirectUrl,
       });
       if (error) {
         if (error.message?.toLowerCase().includes("rate limit") || (error as any).status === 429) {
@@ -1204,11 +1213,10 @@ export function AdminPage() {
             <p className="text-xs text-muted-foreground">
               Invited as staff?{" "}
               <Link
-                to="/account"
-                search={{ tab: "profile", setup_password: "true" }}
+                to="/accept-invitation"
                 className="font-semibold text-primary hover:underline"
               >
-                Set up your password at My Account
+                Activate your staff account here
               </Link>
             </p>
           </div>

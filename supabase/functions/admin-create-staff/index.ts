@@ -113,9 +113,21 @@ Deno.serve(async (req: Request) => {
         ? body.name
         : "";
     const requestedRole = body.role;
-    const requestedRedirect = typeof body.redirectTo === "string" && body.redirectTo.startsWith("http")
-      ? body.redirectTo
-      : "https://shiptmart.vercel.app/account?tab=profile&setup_password=true";
+    // Canonical production redirect URL for staff invitations:
+    // ALWAYS target the public custom production domain: https://shiptmart.vercel.app/accept-invitation
+    // Protected Vercel deployment hostnames (*.vercel.app preview links) trigger vercel.com/login.
+    // Only local development (localhost / 127.0.0.1) is allowed to override this.
+    let canonicalRedirect = "https://shiptmart.vercel.app/accept-invitation";
+    if (typeof body.redirectTo === "string" && body.redirectTo.startsWith("http")) {
+      try {
+        const parsed = new URL(body.redirectTo);
+        if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+          canonicalRedirect = `${parsed.origin}/accept-invitation`;
+        }
+      } catch {
+        // Fall back to canonical production URL
+      }
+    }
 
     const cleanEmail = rawEmail.trim().toLowerCase();
     // Normalize full name: trim, collapse excessive whitespace, cap at 100 characters
@@ -159,7 +171,7 @@ Deno.serve(async (req: Request) => {
       cleanEmail,
       {
         data: userMetadata,
-        redirectTo: requestedRedirect,
+        redirectTo: canonicalRedirect,
       }
     );
 
