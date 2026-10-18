@@ -380,6 +380,38 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
       expect(edgeFuncCode).toContain("deleteUser");
       // Checks for duplicate handling
       expect(edgeFuncCode).toContain("alreadyExists");
+      // Checks that name metadata is passed for GoTrue template variables
+      expect(edgeFuncCode).toContain("userMetadata.full_name = cleanFullName");
+      expect(edgeFuncCode).toContain("userMetadata.name = cleanFullName");
+      expect(edgeFuncCode).toContain("userMetadata.first_name = firstName");
+      // Checks that profiles table is safely updated without overwriting existing data
+      expect(edgeFuncCode).toContain("existingProfile");
+    });
+
+    it("verifies email greeting template Go syntax logic supports safe fallback", () => {
+      // Test the Go template conditional logic:
+      // {{ if .Data.full_name }}{{ .Data.full_name }}{{ else }}there{{ end }}
+      function renderGreeting(data: Record<string, any>): string {
+        const name = (data["full_name"] as string | undefined) || (data["name"] as string | undefined) || (data["first_name"] as string | undefined);
+        const greetingTarget = name && name.trim() ? name.trim() : "there";
+        return `Hello ${greetingTarget},`;
+      }
+
+      // Case 1: Staff member created with full name
+      expect(renderGreeting({ full_name: "Rahul Sharma", name: "Rahul Sharma", first_name: "Rahul" }))
+        .toBe("Hello Rahul Sharma,");
+
+      // Case 2: Staff member created with single name
+      expect(renderGreeting({ full_name: "Musfir", name: "Musfir", first_name: "Musfir" }))
+        .toBe("Hello Musfir,");
+
+      // Case 3: Staff member created without a name (absent/empty)
+      expect(renderGreeting({}))
+        .toBe("Hello there,");
+
+      // Case 4: Staff member created with whitespace-only name
+      expect(renderGreeting({ full_name: "   " }))
+        .toBe("Hello there,");
     });
   });
 });

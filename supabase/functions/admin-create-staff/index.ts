@@ -104,14 +104,24 @@ Deno.serve(async (req: Request) => {
     // 5. Parse and validate payload
     const body = await req.json().catch(() => ({}));
     const rawEmail = typeof body.email === "string" ? body.email : "";
-    const rawFullName = typeof body.fullName === "string" ? body.fullName : (typeof body.name === "string" ? body.name : "");
+    const rawFullName =
+      typeof body.fullName === "string"
+        ? body.fullName
+        : typeof body.full_name === "string"
+        ? body.full_name
+        : typeof body.name === "string"
+        ? body.name
+        : "";
     const requestedRole = body.role;
     const requestedRedirect = typeof body.redirectTo === "string" && body.redirectTo.startsWith("http")
       ? body.redirectTo
-      : "https://shiptmart.vercel.app/account";
+      : "https://shiptmart.vercel.app/account?tab=profile&setup_password=true";
 
     const cleanEmail = rawEmail.trim().toLowerCase();
-    const cleanFullName = rawFullName.trim().slice(0, 100);
+    // Normalize full name: trim, collapse excessive whitespace, cap at 100 characters
+    const cleanFullName = rawFullName.trim().replace(/\s+/g, " ").slice(0, 100);
+    // Extract first name for templates that interpolate {{ .Data.first_name }}
+    const firstName = cleanFullName ? cleanFullName.split(" ")[0] : "";
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!cleanEmail || !emailRegex.test(cleanEmail)) {
@@ -131,14 +141,24 @@ Deno.serve(async (req: Request) => {
     }
 
     // 6. Safe User Invitation via Supabase Auth Admin API
+    // Populate full_name, name, and first_name in user_metadata so email templates
+    // interpolating either {{ .Data.full_name }}, {{ .Data.name }}, or {{ .Data.first_name }}
+    // receive the staff member's actual name.
+    const userMetadata: Record<string, any> = {
+      assigned_role: requestedRole,
+      invited_by: callerUser.id,
+    };
+
+    if (cleanFullName) {
+      userMetadata.full_name = cleanFullName;
+      userMetadata.name = cleanFullName;
+      userMetadata.first_name = firstName;
+    }
+
     const { data: inviteData, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(
       cleanEmail,
       {
-        data: {
-          full_name: cleanFullName,
-          assigned_role: requestedRole,
-          invited_by: callerUser.id,
-        },
+        data: userMetadata,
         redirectTo: requestedRedirect,
       }
     );
@@ -221,16 +241,33 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 8. Ensure profiles table is synchronized with full_name
+    // 8. Ensure profiles table is synchronized with full_name without overwriting unrelated fields
     if (cleanFullName) {
       try {
-        await adminClient.from("profiles").upsert(
-          {
-            id: newUserId,
-            full_name: cleanFullName,
-          },
-          { onConflict: "id" }
-        );
+        const { data: existingProfile } = await adminClient
+          .from("profiles")
+          .select("id, full_name")
+          .eq("id", newUserId)
+          .maybeSingle();
+
+        if (existingProfile) {
+          await adminClient
+            .from("profiles")
+            .update({
+              full_name: cleanFullName,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", newUserId);
+        } else {
+          await adminClient
+            .from("profiles")
+            .insert({
+              id: newUserId,
+              full_name: cleanFullName,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+        }
       } catch (profileError) {
         // Non-blocking for profile name sync
         console.warn("Profile name sync notice:", profileError);

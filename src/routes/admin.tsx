@@ -909,6 +909,8 @@ export function AdminPage() {
         body: {
           email: cleanEmail,
           fullName: cleanName,
+          name: cleanName,
+          full_name: cleanName,
           role: createStaffRole,
           redirectTo: redirectUrl,
         },
@@ -2655,6 +2657,9 @@ export function AdminPage() {
                     placeholder="e.g. Rahul Sharma or Priya Patel"
                     className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                   />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Personalizes the invitation email greeting (e.g. &quot;Hello Rahul Sharma,&quot;).
+                  </p>
                 </div>
 
                 <div>
