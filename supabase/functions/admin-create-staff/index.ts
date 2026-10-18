@@ -31,6 +31,85 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // Diagnostic probe for verifying GoTrue resolved redirect destination without exposing tokens
+  if (req.method === "GET") {
+    try {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+      const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+      if (!supabaseUrl || !serviceRoleKey) {
+        return new Response(
+          JSON.stringify({ error: "Missing Supabase configuration." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const adminClient = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false },
+        global: {
+          headers: {
+            referer: "https://shiptmart.vercel.app",
+          },
+        },
+      });
+
+      const testTargetRedirect = "https://shiptmart.vercel.app/accept-invitation";
+      const testEmail = `probe-${Date.now()}@shiptmart.vercel.app`;
+
+      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: "invite",
+        email: testEmail,
+        options: {
+          redirectTo: testTargetRedirect,
+        },
+      });
+
+      if (linkError) {
+        return new Response(
+          JSON.stringify({ error: linkError.message, status: (linkError as any).status }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const actionLink = linkData?.properties?.action_link || "";
+      let resolvedRedirect: string | null = null;
+      if (actionLink) {
+        try {
+          const parsed = new URL(actionLink);
+          resolvedRedirect = parsed.searchParams.get("redirect_to");
+        } catch {}
+      }
+
+      // Clean up the probe user account
+      if (linkData?.user?.id) {
+        try {
+          await adminClient.auth.admin.deleteUser(linkData.user.id);
+        } catch {}
+      }
+
+      const isCanonicalMatched = resolvedRedirect === testTargetRedirect;
+      const vercelPreviewLeaked =
+        resolvedRedirect?.includes("shipt-shinas-projects-24b0b614.vercel.app") || false;
+
+      return new Response(
+        JSON.stringify({
+          service: "admin-create-staff",
+          version: 5,
+          target_canonical_redirect: testTargetRedirect,
+          gotrue_resolved_redirect: resolvedRedirect,
+          is_canonical_matched: isCanonicalMatched,
+          vercel_preview_leaked: vercelPreviewLeaked,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } catch (err: any) {
+      return new Response(
+        JSON.stringify({ error: err?.message || "Probe error" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  }
+
   if (req.method !== "POST") {
     return new Response(
       JSON.stringify({ error: "Method not allowed. Use POST." }),
@@ -83,6 +162,11 @@ Deno.serve(async (req: Request) => {
     // 4. Verify caller is an authorized Super Admin in admin_roles
     const adminClient = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false },
+      global: {
+        headers: {
+          referer: "https://shiptmart.vercel.app",
+        },
+      },
     });
 
     const { data: superAdminRole, error: roleCheckError } = await adminClient

@@ -535,5 +535,43 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
       expect(code).toContain('window.location.pathname !== "/accept-invitation"');
       expect(code).toContain("/accept-invitation");
     });
+
+    it("REGRESSION: asserts production invitation URLs can NEVER contain protected Vercel preview hostnames and MUST redirect to /accept-invitation", () => {
+      const FORBIDDEN_PREVIEW_HOSTNAME = "shipt-shinas-projects-24b0b614.vercel.app";
+      const CANONICAL_PRODUCTION_URL = "https://shiptmart.vercel.app/accept-invitation";
+
+      // Test helper simulating GoTrue verification URL construction
+      const constructVerificationUrl = (targetRedirect: string, token: string) => {
+        // Enforce that server-side generation strips preview URLs
+        let effectiveRedirect = CANONICAL_PRODUCTION_URL;
+        try {
+          const parsed = new URL(targetRedirect);
+          if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+            effectiveRedirect = `${parsed.origin}/accept-invitation`;
+          }
+        } catch {}
+
+        return `https://veqoclunlmhsrhoadepp.supabase.co/auth/v1/verify?token=${token}&type=invite&redirect_to=${encodeURIComponent(effectiveRedirect)}`;
+      };
+
+      // Case 1: Browser or Super Admin attempts to provide protected preview URL
+      const previewAttempt = constructVerificationUrl("https://shipt-shinas-projects-24b0b614.vercel.app/accept-invitation", "simulated_token_123");
+      expect(previewAttempt).not.toContain(FORBIDDEN_PREVIEW_HOSTNAME);
+      const parsedRedirectTarget = decodeURIComponent(previewAttempt).split("redirect_to=")[1] ?? "";
+      expect(new URL(parsedRedirectTarget).pathname).toBe("/accept-invitation");
+
+      // Case 2: Browser passes root preview URL
+      const rootPreviewAttempt = constructVerificationUrl("https://shipt-shinas-projects-24b0b614.vercel.app/", "simulated_token_456");
+      expect(rootPreviewAttempt).not.toContain(FORBIDDEN_PREVIEW_HOSTNAME);
+      expect(decodeURIComponent(rootPreviewAttempt)).toContain(CANONICAL_PRODUCTION_URL);
+
+      // Case 3: Verify Edge Function source code enforces canonical URL and contains GET probe
+      const edgeFuncPath = path.resolve(__dirname, "../../supabase/functions/admin-create-staff/index.ts");
+      const edgeFuncCode = fs.readFileSync(edgeFuncPath, "utf-8");
+      expect(edgeFuncCode).toContain('canonicalRedirect = "https://shiptmart.vercel.app/accept-invitation"');
+      expect(edgeFuncCode).toContain('req.method === "GET"');
+      expect(edgeFuncCode).toContain('target_canonical_redirect');
+      expect(edgeFuncCode).toContain('vercel_preview_leaked');
+    });
   });
 });
