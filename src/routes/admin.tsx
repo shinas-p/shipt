@@ -39,6 +39,7 @@ import {
   Mail,
   Info,
   HelpCircle,
+  LayoutDashboard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,7 @@ import { BRAND_FALLBACK_IMAGE, resolveOrderItemImage } from "@/lib/catalogApi";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { SmartDashboard } from "@/components/admin/SmartDashboard";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -159,8 +161,8 @@ export function AdminPage() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active dashboard tab: 'orders' | 'products' | 'banners' | 'roles'
-  const [activeTab, setActiveTab] = useState<"orders" | "products" | "banners" | "roles">("orders");
+  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles'
+  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles">("dashboard");
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -1289,6 +1291,20 @@ export function AdminPage() {
       <div className="mt-6 flex gap-2 border-b border-border pb-2 overflow-x-auto [scrollbar-width:none]">
         <button
           type="button"
+          onClick={() => setActiveTab("dashboard")}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+            activeTab === "dashboard"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+          )}
+        >
+          <LayoutDashboard className="size-4" />
+          <span>Dashboard</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab("orders")}
           className={cn(
             "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
@@ -1348,6 +1364,41 @@ export function AdminPage() {
           </>
         )}
       </div>
+
+      {/* TAB 0: SMART DASHBOARD OVERVIEW */}
+      {activeTab === "dashboard" && (
+        <div className="mt-6">
+          <SmartDashboard
+            orders={orders}
+            products={dbProducts}
+            ordersLoading={ordersLoading}
+            productsLoading={productsLoading}
+            adminRole={adminRole}
+            userEmail={session?.user?.email}
+            onRefresh={() => {
+              loadOrders();
+              loadProducts();
+            }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+            onAddNewProduct={() => {
+              setActiveTab("products");
+              openCreateProduct();
+            }}
+            onManageInventory={() => {
+              setActiveTab("products");
+              setProductStockFilter("low_stock");
+            }}
+            onViewOrder={(order) => {
+              setSelectedAdminOrder(order);
+              setTargetStatus(order.status);
+            }}
+            onEditProduct={(product) => {
+              setActiveTab("products");
+              openEditProduct(product);
+            }}
+          />
+        </div>
+      )}
 
       {/* TAB 1: ORDERS MANAGEMENT */}
       {activeTab === "orders" && (
