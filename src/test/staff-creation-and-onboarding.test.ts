@@ -549,7 +549,7 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
           if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
             effectiveRedirect = `${parsed.origin}/accept-invitation`;
           }
-        } catch {}
+        } catch { }
 
         return `https://veqoclunlmhsrhoadepp.supabase.co/auth/v1/verify?token=${token}&type=invite&redirect_to=${encodeURIComponent(effectiveRedirect)}`;
       };

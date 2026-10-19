@@ -51,6 +51,8 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { SmartDashboard } from "@/components/admin/SmartDashboard";
+import { ProductManagementCenter } from "@/components/admin/products/ProductManagementCenter";
+import type { DBCategory } from "@/components/admin/products/types";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -174,8 +176,20 @@ export function AdminPage() {
   const [targetStatus, setTargetStatus] = useState<string>("");
   const [copiedRef, setCopiedRef] = useState(false);
 
-  // Products & Stock state
+  // Products, Categories & Stock state
   const [dbProducts, setDbProducts] = useState<DBProduct[]>([]);
+  const [dbCategories, setDbCategories] = useState<DBCategory[]>(
+    defaultCategories.map((c, i) => ({
+      id: c.id,
+      name: c.name,
+      blurb: c.blurb,
+      display_order: i + 1,
+      is_active: true,
+    }))
+  );
+  const [productCenterSubTab, setProductCenterSubTab] = useState<
+    "catalog" | "categories" | "inventory" | "pricing" | "import_export" | "reports"
+  >("catalog");
   const [productsLoading, setProductsLoading] = useState(false);
   const [productViewMode, setProductViewMode] = useState<"grid" | "list">("grid");
   const [productSearch, setProductSearch] = useState("");
@@ -382,6 +396,22 @@ export function AdminPage() {
     }
   }, []);
 
+  // Load categories from Supabase
+  const loadCategories = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("categories")
+        .select("*")
+        .order("display_order", { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        setDbCategories(data as DBCategory[]);
+      }
+    } catch {
+      // Keep existing defaultCategories
+    }
+  }, []);
+
   // Load banners
   const loadBanners = useCallback(async () => {
     setBannersLoading(true);
@@ -444,12 +474,13 @@ export function AdminPage() {
     if (isAdmin) {
       loadOrders();
       loadProducts();
+      loadCategories();
       if (adminRole === "super_admin") {
         loadBanners();
         loadRoles();
       }
     }
-  }, [isAdmin, adminRole, loadOrders, loadProducts, loadBanners, loadRoles]);
+  }, [isAdmin, adminRole, loadOrders, loadProducts, loadCategories, loadBanners, loadRoles]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1382,11 +1413,11 @@ export function AdminPage() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onAddNewProduct={() => {
               setActiveTab("products");
-              openCreateProduct();
+              setProductCenterSubTab("catalog");
             }}
             onManageInventory={() => {
               setActiveTab("products");
-              setProductStockFilter("low_stock");
+              setProductCenterSubTab("inventory");
             }}
             onViewOrder={(order) => {
               setSelectedAdminOrder(order);
@@ -1909,452 +1940,19 @@ export function AdminPage() {
         </div>
       )}
 
-      {/* TAB 2: PRODUCTS & INVENTORY MANAGEMENT (REDESIGNED) */}
+      {/* TAB 2: COMPLETE PRODUCT MANAGEMENT CENTER */}
       {activeTab === "products" && (
-        <div className="mt-6 space-y-6">
-          {/* Header & Controls Toolbar */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="hero" onClick={openCreateProduct} className="h-9 gap-1.5 text-xs font-bold">
-                <Plus className="size-4" />
-                <span>Add New Product</span>
-              </Button>
-
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {outOfStockCount > 0 && (
-                  <Badge variant="destructive" className="gap-1 text-xs">
-                    <AlertTriangle className="size-3" />
-                    <span>{outOfStockCount} Out of stock</span>
-                  </Badge>
-                )}
-                {lowStockCount > 0 && (
-                  <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/20 text-xs">
-                    {lowStockCount} Low stock
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            {/* View Mode & Refresh */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center rounded-xl border border-input bg-card p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setProductViewMode("grid")}
-                  className={cn(
-                    "rounded-lg p-1.5 transition",
-                    productViewMode === "grid" ? "bg-primary text-primary-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
-                  )}
-                  title="Grid View"
-                >
-                  <LayoutGrid className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setProductViewMode("list")}
-                  className={cn(
-                    "rounded-lg p-1.5 transition",
-                    productViewMode === "list" ? "bg-primary text-primary-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground"
-                  )}
-                  title="List View"
-                >
-                  <List className="size-4" />
-                </button>
-              </div>
-
-              <Button variant="outline" size="sm" onClick={loadProducts} className="h-9 gap-1 text-xs">
-                <RefreshCw className={cn("size-3.5", productsLoading && "animate-spin")} />
-                <span>Refresh</span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Search & Filters */}
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                value={productSearch}
-                onChange={(e) => setProductSearch(e.target.value)}
-                placeholder="Search products by name or description..."
-                className="h-10 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-xs outline-none focus:border-primary"
-              />
-            </div>
-
-            <div>
-              <select
-                value={productCategoryFilter}
-                onChange={(e) => setProductCategoryFilter(e.target.value)}
-                className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-              >
-                <option value="all">All Categories</option>
-                {defaultCategories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <select
-                value={productStockFilter}
-                onChange={(e) => setProductStockFilter(e.target.value as any)}
-                className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-              >
-                <option value="all">All Stock Statuses</option>
-                <option value="in_stock">In Stock (&gt; 5)</option>
-                <option value="low_stock">Low Stock (1 - 5)</option>
-                <option value="out_of_stock">Out of Stock (0)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Products Render: Grid vs List */}
-          {filteredProducts.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-              No products found matching your search and filter criteria.
-            </div>
-          ) : productViewMode === "grid" ? (
-            /* GRID VIEW */
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {filteredProducts.map((p) => {
-                const isOutOfStock = p.stock === 0;
-                const isLowStock = p.stock > 0 && p.stock <= 5;
-
-                return (
-                  <div
-                    key={p.id}
-                    className="overflow-hidden rounded-3xl border border-border bg-card p-4 shadow-2xs transition hover:border-primary/40 flex flex-col justify-between"
-                  >
-                    <div>
-                      {/* Product Image */}
-                      <div className="relative h-40 w-full overflow-hidden rounded-2xl bg-muted border border-border/60">
-                        <img
-                          src={p.image_url}
-                          alt={p.name}
-                          className="h-full w-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.src = BRAND_FALLBACK_IMAGE;
-                          }}
-                        />
-                        <div className="absolute right-2 top-2 flex flex-col gap-1">
-                          <span
-                            className={cn(
-                              "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase backdrop-blur shadow-2xs",
-                              isOutOfStock
-                                ? "bg-destructive text-destructive-foreground"
-                                : isLowStock
-                                ? "bg-amber-500 text-white"
-                                : "bg-primary text-primary-foreground"
-                            )}
-                          >
-                            {isOutOfStock ? "Out of Stock" : `${p.stock} in stock`}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="mt-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                          {p.category_id}
-                        </span>
-                        <h4 className="font-display text-sm font-bold text-foreground line-clamp-1">{p.name}</h4>
-                        <p className="text-xs text-muted-foreground">{p.size}</p>
-                        {p.description && (
-                          <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">{p.description}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex items-center justify-between border-t border-border/60 pt-3">
-                      <div>
-                        <span className="font-mono text-sm font-extrabold text-foreground">
-                          {formatINR(p.price)}
-                        </span>
-                        {p.original_price != null && p.original_price > p.price && (
-                          <span className="ml-1 text-[11px] text-muted-foreground line-through">
-                            {formatINR(p.original_price)}
-                          </span>
-                        )}
-                      </div>
-
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEditProduct(p)}
-                        className="h-8 gap-1.5 text-xs font-semibold"
-                      >
-                        <Edit3 className="size-3.5" />
-                        <span>Edit</span>
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            /* LIST VIEW */
-            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
-                  <tr>
-                    <th className="p-3 font-semibold">Product</th>
-                    <th className="p-3 font-semibold">Category</th>
-                    <th className="p-3 font-semibold">Price</th>
-                    <th className="p-3 font-semibold">Stock</th>
-                    <th className="p-3 font-semibold">Status</th>
-                    <th className="p-3 font-semibold text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {filteredProducts.map((p) => {
-                    const isOutOfStock = p.stock === 0;
-                    const isLowStock = p.stock > 0 && p.stock <= 5;
-
-                    return (
-                      <tr key={p.id} className="hover:bg-secondary/20">
-                        <td className="p-3 flex items-center gap-3">
-                          <img
-                            src={p.image_url}
-                            alt=""
-                            className="size-10 rounded-xl object-cover bg-muted border border-border/60"
-                            onError={(e) => {
-                              e.currentTarget.src = BRAND_FALLBACK_IMAGE;
-                            }}
-                          />
-                          <div>
-                            <span className="font-semibold text-foreground block text-sm">{p.name}</span>
-                            <span className="text-[11px] text-muted-foreground">{p.size}</span>
-                          </div>
-                        </td>
-                        <td className="p-3 capitalize text-muted-foreground">{p.category_id}</td>
-                        <td className="p-3 font-mono font-bold text-foreground">
-                          {formatINR(p.price)}
-                          {p.original_price != null && p.original_price > p.price && (
-                            <span className="ml-1 text-[10px] text-muted-foreground line-through font-normal">
-                              {formatINR(p.original_price)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <span
-                            className={cn(
-                              "rounded-md px-2 py-0.5 font-bold",
-                              isOutOfStock
-                                ? "bg-destructive/10 text-destructive"
-                                : isLowStock
-                                ? "bg-amber-500/15 text-amber-700"
-                                : "bg-primary/10 text-primary"
-                            )}
-                          >
-                            {p.stock} units
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          {isOutOfStock ? (
-                            <span className="text-destructive font-semibold">Out of stock</span>
-                          ) : isLowStock ? (
-                            <span className="text-amber-700 font-semibold">Low stock</span>
-                          ) : (
-                            <span className="text-primary font-semibold">Available</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openEditProduct(p)}
-                            className="h-7 gap-1 text-xs"
-                          >
-                            <Edit3 className="size-3" />
-                            <span>Edit</span>
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* CREATE / EDIT PRODUCT MODAL */}
-          <Dialog
-            open={isCreatingProduct || editingProduct !== null}
-            onOpenChange={(open) => {
-              if (!open) {
-                setIsCreatingProduct(false);
-                setEditingProduct(null);
-              }
-            }}
-          >
-            <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto rounded-3xl p-6 sm:p-8">
-              <DialogHeader>
-                <DialogTitle className="font-display text-xl font-bold">
-                  {editingProduct ? `Edit ${editingProduct.name}` : "Create New Product"}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Update product information, inventory stock, and upload real images directly to Supabase storage.
-                </DialogDescription>
-              </DialogHeader>
-
-              <form onSubmit={handleSaveProduct} className="mt-4 space-y-4">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={productForm.name}
-                    onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                    placeholder="e.g. Spiral Notebook"
-                    className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Size / Unit *</label>
-                    <input
-                      type="text"
-                      required
-                      value={productForm.size}
-                      onChange={(e) => setProductForm({ ...productForm, size: e.target.value })}
-                      placeholder="e.g. 120 g, Pack of 3"
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Category *</label>
-                    <select
-                      value={productForm.category_id}
-                      onChange={(e) => setProductForm({ ...productForm, category_id: e.target.value })}
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    >
-                      {defaultCategories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Price (₹) *</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      required
-                      value={productForm.price}
-                      onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-                      placeholder="60"
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Original Price (₹)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={productForm.original_price}
-                      onChange={(e) => setProductForm({ ...productForm, original_price: e.target.value })}
-                      placeholder="Optional"
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Stock *</label>
-                    <input
-                      type="number"
-                      min="0"
-                      required
-                      value={productForm.stock}
-                      onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
-                      placeholder="25"
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Description</label>
-                  <textarea
-                    rows={2}
-                    value={productForm.description}
-                    onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
-                    placeholder="Short product overview for the student customer..."
-                    className="w-full rounded-xl border border-input bg-card p-2.5 text-xs outline-none focus:border-primary"
-                  />
-                </div>
-
-                {/* Real Image Upload to Supabase Storage */}
-                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-2">
-                  <label className="block text-xs font-semibold text-foreground">Product Image</label>
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={productForm.image_url || BRAND_FALLBACK_IMAGE}
-                      alt="Preview"
-                      className="size-14 rounded-xl object-cover bg-muted border border-border"
-                      onError={(e) => {
-                        e.currentTarget.src = BRAND_FALLBACK_IMAGE;
-                      }}
-                    />
-                    <div className="flex-1">
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={handleProductImageUpload}
-                        disabled={uploadingProductImage}
-                        className="block w-full text-xs text-muted-foreground file:mr-2 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/90"
-                      />
-                      {uploadingProductImage && (
-                        <p className="text-[11px] text-primary animate-pulse mt-1">Uploading to Supabase Storage...</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="product-active"
-                    checked={productForm.is_active}
-                    onChange={(e) => setProductForm({ ...productForm, is_active: e.target.checked })}
-                    className="size-4 rounded text-primary"
-                  />
-                  <label htmlFor="product-active" className="text-xs font-semibold text-foreground">
-                    Active and visible in customer storefront
-                  </label>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setIsCreatingProduct(false);
-                      setEditingProduct(null);
-                    }}
-                    className="h-10 text-xs"
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" variant="hero" disabled={savingProduct} className="h-10 text-xs font-bold px-5">
-                    {savingProduct ? <Loader2 className="size-4 animate-spin" /> : editingProduct ? "Save Changes" : "Create Product"}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+        <div className="mt-6">
+          <ProductManagementCenter
+            products={dbProducts}
+            categories={dbCategories}
+            orders={orders}
+            adminRole={adminRole}
+            productsLoading={productsLoading}
+            onRefreshProducts={loadProducts}
+            onRefreshCategories={loadCategories}
+            initialTab={productCenterSubTab}
+          />
         </div>
       )}
 

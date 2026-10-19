@@ -215,7 +215,7 @@ describe("Shipt Smart Dashboard Enhancement", { timeout: 15000 }, () => {
     // Click restock button
     const restockButtons = screen.getAllByRole("button", { name: /restock/i });
     expect(restockButtons.length).toBe(2);
-    fireEvent.click(restockButtons[0]);
+    fireEvent.click(restockButtons[0]!);
     expect(mockOnEditProduct).toHaveBeenCalledWith(mockProducts[1]); // Out of stock (0) is sorted first
   });
 
@@ -370,7 +370,7 @@ describe("Shipt Smart Dashboard Enhancement", { timeout: 15000 }, () => {
     expect(screen.getByText("Rahul Sharma")).toBeInTheDocument();
 
     const viewButtons = screen.getAllByRole("button", { name: /^view$/i });
-    fireEvent.click(viewButtons[0]);
+    fireEvent.click(viewButtons[0]!);
     expect(mockOnViewOrder).toHaveBeenCalledWith(mockOrders[0]);
   });
 });
