@@ -44,19 +44,24 @@ interface ReviewStats {
   totalReviews: number;
 }
 
-function WishlistPage() {
-  const { wishlist, toggleWish, add, getProduct, setCartOpen, categories, isLoadingCatalog } = useStore();
+export function WishlistPage() {
+  const {
+    savedWishlistProducts,
+    toggleWish,
+    clearWishlist,
+    add,
+    getProduct,
+    setCartOpen,
+    categories,
+    isLoadingCatalog,
+  } = useStore();
   const navigate = useNavigate();
 
   // Ratings cache for items in wishlist
   const [reviewsMap, setReviewsMap] = useState<Record<string, ReviewStats>>({});
 
-  // Resolve valid products from catalog
-  const savedProducts = useMemo(() => {
-    return wishlist
-      .map((id) => getProduct(id))
-      .filter((p): p is Product => p !== undefined);
-  }, [wishlist, getProduct]);
+  // Authoritative resolved products from store
+  const savedProducts = savedWishlistProducts;
 
   // Load reviews/ratings for saved products
   useEffect(() => {
@@ -122,9 +127,7 @@ function WishlistPage() {
 
   const handleClearAll = () => {
     if (!confirm("Are you sure you want to remove all saved items from your wishlist?")) return;
-    for (const p of savedProducts) {
-      toggleWish(p);
-    }
+    clearWishlist();
     toast("Wishlist cleared");
   };
 

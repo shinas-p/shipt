@@ -4,18 +4,28 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store";
 import { useCustomerAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { BRAND_NAME, BRAND_TAGLINE, CAMPUS_NAME, categories } from "@/data/products";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OrderTrackerModal } from "./OrderTrackerModal";
 
 export function Logo() {
+  const { branding } = useBranding();
   return (
-    <Link to="/" className="flex items-center gap-2" aria-label={`${BRAND_NAME} home`}>
-      <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
-        <ShoppingBag className="size-5" />
-      </span>
-      <span className="font-display text-lg font-extrabold tracking-tight">{BRAND_NAME}</span>
+    <Link to="/" className="flex items-center gap-2" aria-label={`${branding.store_name} home`}>
+      {branding.logo_url ? (
+        <img
+          src={branding.logo_url}
+          alt={branding.store_name}
+          className="size-9 object-contain rounded-xl"
+        />
+      ) : (
+        <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <ShoppingBag className="size-5" />
+        </span>
+      )}
+      <span className="font-display text-lg font-extrabold tracking-tight">{branding.store_name}</span>
     </Link>
   );
 }
@@ -49,8 +59,10 @@ export function SearchBar({ className = "" }: { className?: string }) {
 
 export function Header() {
   const navigate = useNavigate();
-  const { itemCount, setCartOpen, setCategory, wishlist } = useStore();
+  const { itemCount, setCartOpen, setCategory, wishlist = [], wishlistCount } = useStore();
+  const displayWishlistCount = wishlistCount ?? (Array.isArray(wishlist) ? wishlist.length : 0);
   const { user, profile, isLoading } = useCustomerAuth();
+  const { branding } = useBranding();
   const [menu, setMenu] = useState(false);
   const [trackerOpen, setTrackerOpen] = useState(false);
 
@@ -92,7 +104,7 @@ export function Header() {
       <div className="bg-forest text-forest-foreground">
         <p className="container-page py-1.5 text-center text-xs font-medium sm:text-sm">
           <span className="mr-1.5 inline-block size-1.5 rounded-full bg-lime align-middle" />
-          {BRAND_NAME} — {BRAND_TAGLINE} Fast delivery across {CAMPUS_NAME}.
+          {branding.store_name} — {branding.tagline} Fast delivery across {CAMPUS_NAME}.
         </p>
       </div>
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
@@ -137,9 +149,9 @@ export function Header() {
               title="Saved Wishlist"
             >
               <Heart className="size-5" />
-              {wishlist.length > 0 && (
+              {displayWishlistCount > 0 && (
                 <span className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                  {wishlist.length}
+                  {displayWishlistCount}
                 </span>
               )}
             </Link>
@@ -212,7 +224,7 @@ export function Header() {
                 <User className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-muted-foreground">{user ? "Signed In" : "Welcome to Shipt"}</p>
+                <p className="truncate text-xs text-muted-foreground">{user ? "Signed In" : `Welcome to ${branding.store_name}`}</p>
                 <p className="truncate text-sm font-bold text-foreground">
                   {user ? (profile?.full_name || user.email) : "Sign In / Register"}
                 </p>
@@ -262,7 +274,7 @@ export function Header() {
                 <span>Saved Wishlist</span>
               </div>
               <span className="grid min-w-5 place-items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
-                {wishlist.length}
+                {displayWishlistCount}
               </span>
             </Link>
           </div>

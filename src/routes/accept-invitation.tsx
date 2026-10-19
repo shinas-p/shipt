@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useBranding } from "@/lib/branding";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/data/products";
 import { toast } from "sonner";
 
@@ -37,6 +38,7 @@ type PageState = "loading" | "valid_session" | "already_active" | "invalid_or_ex
 
 function AcceptInvitationPage() {
   const navigate = useNavigate();
+  const { branding } = useBranding();
 
   const [pageState, setPageState] = useState<PageState>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -297,13 +299,17 @@ function AcceptInvitationPage() {
       <div className="w-full max-w-lg">
         {/* BRAND HEADER */}
         <div className="mb-6 text-center">
-          <Link to="/" className="inline-flex items-center gap-2 mb-3 group" aria-label="Shipt Home">
-            <span className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-sm transition group-hover:scale-105">
-              <ShoppingBag className="size-6" />
-            </span>
-            <span className="font-display text-2xl font-black tracking-tight text-foreground">{BRAND_NAME}</span>
+          <Link to="/" className="inline-flex items-center gap-2 mb-3 group" aria-label={`${branding.store_name} Home`}>
+            {branding.logo_url ? (
+              <img src={branding.logo_url} alt={branding.store_name} className="size-11 object-contain rounded-2xl shadow-sm transition group-hover:scale-105" />
+            ) : (
+              <span className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground shadow-sm transition group-hover:scale-105">
+                <ShoppingBag className="size-6" />
+              </span>
+            )}
+            <span className="font-display text-2xl font-black tracking-tight text-foreground">{branding.store_name}</span>
           </Link>
-          <p className="text-xs text-muted-foreground font-medium">{BRAND_TAGLINE}</p>
+          <p className="text-xs text-muted-foreground font-medium">{branding.tagline}</p>
         </div>
 
         {/* STATE 1: LOADING */}

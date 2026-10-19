@@ -33,6 +33,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCustomerAuth, type CustomerOrderSummary } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 import { formatINR, BRAND_NAME, CAMPUS_NAME } from "@/data/products";
 import { resolveOrderItemImage, BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
 import { isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
@@ -84,6 +85,7 @@ function getStatusBadge(status: string) {
 }
 
 function AccountPage() {
+  const { branding } = useBranding();
   const { user, profile, isLoading, signIn, signUp, signOut, resetPassword, updatePassword, updateProfile, fetchCustomerOrders } =
     useCustomerAuth();
 
@@ -415,7 +417,7 @@ function AccountPage() {
               <User className="size-6" />
             </span>
             <h1 className="mt-3 font-display text-2xl font-extrabold sm:text-3xl text-foreground">
-              {BRAND_NAME} Student Account
+              {branding.store_name} Student Account
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Sign in or create an account for 1-click hostel delivery and order history across {CAMPUS_NAME}.

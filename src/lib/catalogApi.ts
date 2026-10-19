@@ -142,6 +142,7 @@ export async function loadProducts(): Promise<Product[]> {
         stock: p.stock ?? 0,
         bestseller: Boolean(p.bestseller),
         isNew: Boolean(p.is_new),
+        slug: p.slug || undefined,
       };
       if (p.original_price != null) {
         prod.originalPrice = Number(p.original_price);

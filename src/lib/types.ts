@@ -24,6 +24,7 @@ export interface Product {
   stock: number;
   bestseller?: boolean | undefined;
   isNew?: boolean | undefined;
+  slug?: string | undefined;
 }
 
 export interface CartItem {

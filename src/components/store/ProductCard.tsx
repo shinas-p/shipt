@@ -9,10 +9,10 @@ import { cn } from "@/lib/utils";
 
 export function ProductCard({ product: p }: { product: Product }) {
   const navigate = useNavigate();
-  const { qtyOf, add, wishlist, toggleWish } = useStore();
+  const { qtyOf, add, isWished, toggleWish } = useStore();
   const [isNavigating, setIsNavigating] = useState(false);
   const qty = qtyOf(p.id);
-  const wished = wishlist.includes(p.id);
+  const wished = isWished(p);
   const out = p.stock === 0;
   const discount = p.originalPrice ? Math.round((1 - p.price / p.originalPrice) * 100) : 0;
 

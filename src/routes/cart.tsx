@@ -37,14 +37,25 @@ export const Route = createFileRoute("/cart")({
 });
 
 function CartPage() {
-  const { cart, itemCount, subtotal, setQty, remove, clear, wishlist, toggleWish, add, getProduct } =
-    useStore();
+  const {
+    cart,
+    itemCount,
+    subtotal,
+    setQty,
+    remove,
+    clear,
+    isWished,
+    toggleWish,
+    add,
+    getProduct,
+    savedWishlistProducts,
+  } = useStore();
   const navigate = useNavigate();
 
   const handleSaveForLater = (productId: string) => {
     const p = getProduct(productId);
     if (!p) return;
-    if (!wishlist.includes(p.id)) {
+    if (!isWished(p)) {
       toggleWish(p);
     }
     remove(p.id);
@@ -62,9 +73,7 @@ function CartPage() {
     toggleWish(p);
   };
 
-  const savedProducts = wishlist
-    .map((id) => getProduct(id))
-    .filter((p): p is NonNullable<typeof p> => p !== undefined);
+  const savedProducts = savedWishlistProducts;
 
   return (
     <div className="container-page py-6 md:py-10">

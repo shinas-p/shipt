@@ -40,6 +40,7 @@ import {
   Info,
   HelpCircle,
   LayoutDashboard,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,10 +49,12 @@ import { supabase, isSupabaseConfigured, validateSupabaseConfig } from "@/lib/su
 import { formatINR, categories as defaultCategories } from "@/data/products";
 import { BRAND_FALLBACK_IMAGE, resolveOrderItemImage } from "@/lib/catalogApi";
 import { useStore } from "@/lib/store";
+import { useBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { SmartDashboard } from "@/components/admin/SmartDashboard";
 import { ProductManagementCenter } from "@/components/admin/products/ProductManagementCenter";
+import { StoreBrandingTab } from "@/components/admin/StoreBrandingTab";
 import type { DBCategory } from "@/components/admin/products/types";
 
 export const Route = createFileRoute("/admin")({
@@ -152,6 +155,7 @@ interface AdminRoleUser {
 
 export function AdminPage() {
   const { refreshCatalog } = useStore();
+  const { branding } = useBranding();
   const [session, setSession] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [adminRole, setAdminRole] = useState<"super_admin" | "store_manager" | null>(null);
@@ -163,8 +167,8 @@ export function AdminPage() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles'
-  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles">("dashboard");
+  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'branding'
+  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "branding">("dashboard");
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -1174,7 +1178,7 @@ export function AdminPage() {
           </div>
 
           <h1 className="mt-4 text-center font-display text-2xl font-bold tracking-tight text-foreground">
-            Shipt Staff & Admin Portal
+            {branding.store_name} Staff & Admin Portal
           </h1>
           <p className="mt-1 text-center text-xs text-muted-foreground">
             Sign in with authorized credentials to access inventory and store operations.
@@ -1283,13 +1287,17 @@ export function AdminPage() {
       {/* Admin Top Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
         <div className="flex items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground">
-            <ShieldCheck className="size-6" />
-          </div>
+          {branding.logo_url ? (
+            <img src={branding.logo_url} alt={branding.store_name} className="size-11 rounded-2xl object-contain border border-border/80 bg-card p-1 shadow-xs" />
+          ) : (
+            <div className="grid size-11 place-items-center rounded-2xl bg-primary text-primary-foreground">
+              <ShieldCheck className="size-6" />
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-                Shipt Administration
+                {branding.store_name} Administration
               </h1>
               <Badge
                 variant="outline"
@@ -1391,6 +1399,20 @@ export function AdminPage() {
             >
               <Users className="size-4" />
               <span>Staff & Roles</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("branding")}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+                activeTab === "branding"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <Sparkles className="size-4" />
+              <span>Store Branding</span>
             </button>
           </>
         )}
@@ -2548,6 +2570,16 @@ export function AdminPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB 5: STORE BRANDING SETTINGS (Super Admin Only) */}
+      {activeTab === "branding" && (
+        <div className="mt-6">
+          <StoreBrandingTab
+            adminRole={adminRole}
+            onNavigateStorefront={() => {}}
+          />
         </div>
       )}
     </div>

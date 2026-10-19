@@ -11,12 +11,12 @@ import { cn } from "@/lib/utils";
 import { BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
 
 export function ProductDetailsModal() {
-  const { detail: p, setDetail, add, wishlist, toggleWish, categories } = useStore();
+  const { detail: p, setDetail, add, isWished, toggleWish, categories } = useStore();
   const [qty, setQty] = useState(1);
   useEffect(() => setQty(1), [p?.id]);
   if (!p) return null;
   const out = p.stock === 0;
-  const wished = wishlist.includes(p.id);
+  const wished = isWished(p);
 
   return (
     <Dialog open={!!p} onOpenChange={(o) => !o && setDetail(null)}>

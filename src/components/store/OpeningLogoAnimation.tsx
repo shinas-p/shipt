@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { ShoppingBag } from "lucide-react";
+import { useBranding } from "@/lib/branding";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/data/products";
 
 export const INTRO_SESSION_STORAGE_KEY = "shipt_opening_intro_shown";
@@ -24,6 +25,7 @@ export const INTRO_SESSION_STORAGE_KEY = "shipt_opening_intro_shown";
  * - Non-blocking: unmounts completely from the DOM after completion.
  */
 export function OpeningLogoAnimation() {
+  const { branding } = useBranding();
   const [isVisible, setIsVisible] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
 
@@ -159,11 +161,17 @@ export function OpeningLogoAnimation() {
 
       {/* Main Brand Logo & Content Card */}
       <div className="relative flex flex-col items-center text-center px-6">
-        {/* Shipt Shopping-Bag Icon Badge */}
+        {/* Shipt Shopping-Bag Icon Badge or Custom Logo */}
         <div className="animate-shipt-logo-pop relative mb-5">
-          <div className="grid size-20 sm:size-24 place-items-center rounded-3xl bg-primary text-primary-foreground shadow-lift">
-            <ShoppingBag className="size-10 sm:size-12 stroke-[2.2]" />
-          </div>
+          {branding.logo_url ? (
+            <div className="grid size-20 sm:size-24 place-items-center rounded-3xl bg-primary/10 border border-primary/20 shadow-lift p-2.5 overflow-hidden">
+              <img src={branding.logo_url} alt={branding.store_name} className="size-full object-contain" />
+            </div>
+          ) : (
+            <div className="grid size-20 sm:size-24 place-items-center rounded-3xl bg-primary text-primary-foreground shadow-lift">
+              <ShoppingBag className="size-10 sm:size-12 stroke-[2.2]" />
+            </div>
+          )}
           {/* Subtle decorative pulsing ring */}
           <div className="absolute -inset-2 -z-10 rounded-4xl bg-primary/10 animate-pulse" />
         </div>
@@ -171,14 +179,14 @@ export function OpeningLogoAnimation() {
         {/* Brand Name Typography */}
         <div className="animate-shipt-text-reveal">
           <h1 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tight text-foreground">
-            {BRAND_NAME}
+            {branding.store_name}
           </h1>
         </div>
 
         {/* Brand Tagline */}
         <div className="animate-shipt-tagline-reveal mt-2">
           <p className="text-xs sm:text-sm font-semibold tracking-wider text-muted-foreground uppercase">
-            {BRAND_TAGLINE}
+            {branding.tagline}
           </p>
         </div>
 

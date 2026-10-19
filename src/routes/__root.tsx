@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth";
+import { BrandingProvider } from "@/lib/branding";
 import { StoreProvider } from "@/lib/store";
 import { Header } from "@/components/store/Header";
 import { Footer } from "@/components/store/Footer";
@@ -127,17 +128,19 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <StoreProvider>
-          <OpeningLogoAnimation />
-          <Header />
-          <main className="overflow-x-hidden">
-            <Outlet />
-          </main>
-          <Footer />
-          <CartDrawer />
-          <ProductDetailsModal />
-          <Toaster position="top-center" richColors />
-        </StoreProvider>
+        <BrandingProvider>
+          <StoreProvider>
+            <OpeningLogoAnimation />
+            <Header />
+            <main className="overflow-x-hidden">
+              <Outlet />
+            </main>
+            <Footer />
+            <CartDrawer />
+            <ProductDetailsModal />
+            <Toaster position="top-center" richColors />
+          </StoreProvider>
+        </BrandingProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

@@ -40,7 +40,7 @@ export const Route = createFileRoute("/product/$productId")({
 function ProductDetailPage() {
   const { productId } = useParams({ from: "/product/$productId" });
   const navigate = useNavigate();
-  const { getProduct, add, wishlist, toggleWish, categories, isLoadingCatalog, setCartOpen } = useStore();
+  const { getProduct, add, isWished: checkIsWished, toggleWish, categories, isLoadingCatalog, setCartOpen } = useStore();
 
   const [qty, setQty] = useState(1);
   const [isBuyingNow, setIsBuyingNow] = useState(false);
@@ -165,7 +165,7 @@ function ProductDetailPage() {
 
   const outOfStock = product.stock === 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
-  const isWished = wishlist.includes(product.id);
+  const isWished = checkIsWished(product);
   const discountPercent = product.originalPrice
     ? Math.round((1 - product.price / product.originalPrice) * 100)
     : 0;
