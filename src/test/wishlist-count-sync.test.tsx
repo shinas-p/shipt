@@ -65,7 +65,7 @@ describe("Wishlist Synchronized Count & State System", () => {
 
   it("1. Adding product updates header badge count and /wishlist items", async () => {
     // Start with empty wishlist
-    const sampleProduct = defaultProducts[0]; // Spiral Notebook ("notebook-a5")
+    const sampleProduct = defaultProducts[0]!; // Spiral Notebook ("notebook-a5")
 
     function TestApp() {
       const { toggleWish } = useStore();
@@ -166,7 +166,7 @@ describe("Wishlist Synchronized Count & State System", () => {
   });
 
   it("4. Toggling from product card reflects in header badge immediately", async () => {
-    const sampleProduct = defaultProducts[1]; // Blue Ballpoint Pens ("pen-blue-3")
+    const sampleProduct = defaultProducts[1]!; // Blue Ballpoint Pens ("pen-blue-3")
 
     function TestCardAndHeader() {
       return (
