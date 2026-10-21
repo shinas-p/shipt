@@ -4,10 +4,10 @@ import { CheckoutForm } from "@/components/store/CheckoutForm";
 export const Route = createFileRoute("/checkout")({
   head: () => ({
     meta: [
-      { title: "Checkout — Shipt" },
-      { name: "description", content: "Fast delivery to your hostel room or campus pickup at Darul Huda University." },
-      { property: "og:title", content: "Checkout — Shipt" },
-      { property: "og:description", content: "Fast delivery to your hostel room or campus pickup at Darul Huda University." },
+      { title: "Checkout — Shipt Mart" },
+      { name: "description", content: "Fast delivery to your doorstep or quick local pickup with Shipt Mart." },
+      { property: "og:title", content: "Checkout — Shipt Mart" },
+      { property: "og:description", content: "Fast delivery to your doorstep or quick local pickup with Shipt Mart." },
     ],
   }),
   component: CheckoutPage,
@@ -23,7 +23,7 @@ function CheckoutPage() {
         Checkout
       </h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Order essentials directly to your hostel room or arrange easy campus pickup.
+        Order essentials directly to your doorstep or arrange convenient local pickup.
       </p>
       <CheckoutForm />
     </div>

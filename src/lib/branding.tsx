@@ -17,8 +17,8 @@ export interface StoreBranding {
 }
 
 export const DEFAULT_BRANDING: StoreBranding = {
-  store_name: "Shipt",
-  tagline: "Your Campus. Your Marketplace.",
+  store_name: "Shipt Mart",
+  tagline: "Everyday Essentials. Delivered Fast.",
   logo_url: null,
   favicon_url: null,
 };

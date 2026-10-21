@@ -6,7 +6,7 @@ import { useStore } from "@/lib/store";
 import { useCustomerAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { BRAND_NAME, BRAND_TAGLINE, CAMPUS_NAME, categories } from "@/data/products";
+import { BRAND_NAME, BRAND_TAGLINE, categories } from "@/data/products";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OrderTrackerModal } from "./OrderTrackerModal";
 
@@ -104,7 +104,7 @@ export function Header() {
       <div className="bg-forest text-forest-foreground">
         <p className="container-page py-1.5 text-center text-xs font-medium sm:text-sm">
           <span className="mr-1.5 inline-block size-1.5 rounded-full bg-lime align-middle" />
-          {branding.store_name} — {branding.tagline} Fast delivery across {CAMPUS_NAME}.
+          {branding.store_name} — {branding.tagline} Fast doorstep delivery.
         </p>
       </div>
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
@@ -120,13 +120,13 @@ export function Header() {
           <Logo />
           <button
             type="button"
-            onClick={() => toast("Hostel delivery is available at checkout!")}
+            onClick={() => toast("Fast doorstep delivery is available at checkout!")}
             className="ml-4 hidden items-center gap-2 rounded-full px-3 py-1.5 text-left hover:bg-secondary lg:flex"
           >
             <MapPin className="size-4 text-primary" />
             <span className="leading-tight">
               <span className="block text-[11px] text-muted-foreground">Delivering to</span>
-              <span className="block text-sm font-semibold">Campus Hostels</span>
+              <span className="block text-sm font-semibold">Your Doorstep</span>
             </span>
           </button>
           <SearchBar className="mx-auto hidden max-w-md flex-1 md:block" />
@@ -163,9 +163,17 @@ export function Header() {
               title={user ? `Account (${profile?.full_name || user.email})` : "Sign In / Register"}
             >
               {user ? (
-                <div className="grid size-7 place-items-center rounded-full bg-primary/15 text-primary text-xs font-bold">
-                  {userInitial}
-                </div>
+                profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt={profile.full_name || "Account"}
+                    className="size-7 rounded-full object-cover ring-1 ring-primary/30"
+                  />
+                ) : (
+                  <div className="grid size-7 place-items-center rounded-full bg-primary/15 text-primary text-xs font-bold">
+                    {userInitial}
+                  </div>
+                )
               ) : (
                 <User className="size-5" />
               )}
@@ -211,7 +219,7 @@ export function Header() {
             <SheetTitle className="text-left">Menu</SheetTitle>
           </SheetHeader>
           <div className="mt-4 flex items-center gap-2 rounded-xl bg-secondary p-3 text-sm">
-            <MapPin className="size-4 text-primary" /> Delivering to your hostel room
+            <MapPin className="size-4 text-primary" /> Fast delivery to your doorstep
           </div>
 
           <div className="mt-4 border-b border-border pb-3 space-y-2">

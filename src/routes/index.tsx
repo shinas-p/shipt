@@ -5,10 +5,10 @@ import { CategoryGrid, ProductGrid, RecentlyAdded } from "@/components/store/Sec
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Shipt — Your Campus. Your Marketplace." },
-      { name: "description", content: "Snacks, stationery, and hostel essentials delivered straight to your room at Darul Huda University." },
-      { property: "og:title", content: "Shipt — Your Campus. Your Marketplace." },
-      { property: "og:description", content: "Snacks, stationery, and hostel essentials delivered straight to your room at Darul Huda University." },
+      { title: "Shipt Mart — Everyday Essentials Delivered" },
+      { name: "description", content: "Snacks, stationery, personal care, and everyday essentials delivered straight to your door." },
+      { property: "og:title", content: "Shipt Mart — Everyday Essentials Delivered" },
+      { property: "og:description", content: "Snacks, stationery, personal care, and everyday essentials delivered straight to your door." },
     ],
   }),
   component: Index,

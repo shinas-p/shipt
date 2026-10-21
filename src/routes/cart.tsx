@@ -24,12 +24,12 @@ export const Route = createFileRoute("/cart")({
       { title: `Shopping Cart — ${BRAND_NAME}` },
       {
         name: "description",
-        content: `Review your campus essentials cart, adjust quantities, and proceed to checkout at ${CAMPUS_NAME}.`,
+        content: `Review your shopping cart, adjust quantities, and proceed to checkout on ${BRAND_NAME}.`,
       },
       { property: "og:title", content: `Shopping Cart — ${BRAND_NAME}` },
       {
         property: "og:description",
-        content: `Review your campus essentials cart, adjust quantities, and proceed to checkout at ${CAMPUS_NAME}.`,
+        content: `Review your shopping cart, adjust quantities, and proceed to checkout on ${BRAND_NAME}.`,
       },
     ],
   }),
@@ -91,7 +91,7 @@ function CartPage() {
             Shopping Cart
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
-            Deliverable directly to your hostel room across {CAMPUS_NAME}.
+            Fast, reliable delivery straight to your doorstep.
           </p>
         </div>
 
@@ -119,7 +119,7 @@ function CartPage() {
           </div>
           <h2 className="mt-4 font-display text-xl font-bold text-foreground">Your cart is empty</h2>
           <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-            You haven't added any campus essentials yet. Explore our snacks, stationery, and hostel supplies.
+            You haven't added any items yet. Explore our snacks, drinks, stationery, and daily supplies.
           </p>
           <Button asChild variant="hero" className="mt-6 h-11 px-6 font-bold text-xs">
             <Link to="/">Start Shopping</Link>
@@ -223,13 +223,13 @@ function CartPage() {
               })}
             </div>
 
-            {/* Campus Delivery Guarantee Note */}
+            {/* Fast Delivery Guarantee Note */}
             <div className="flex items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs text-foreground">
               <Truck className="size-5 shrink-0 text-primary" />
               <div>
-                <p className="font-bold">Fast Campus Delivery</p>
+                <p className="font-bold">Fast Local Delivery</p>
                 <p className="text-muted-foreground">
-                  Delivering to all residential hostels (Ganga, Yamuna, Kaveri, Narmada, International House) and campus pickup points.
+                  Delivering quickly to your doorstep or designated local pickup points.
                 </p>
               </div>
             </div>
@@ -247,8 +247,8 @@ function CartPage() {
                 </div>
 
                 <div className="flex justify-between text-muted-foreground">
-                  <span>Campus Delivery</span>
-                  <span className="font-semibold text-primary">Free on Campus</span>
+                  <span>Standard Delivery</span>
+                  <span className="font-semibold text-primary">Free</span>
                 </div>
 
                 <div className="border-t border-border pt-3 flex justify-between text-base font-bold text-foreground">
@@ -278,7 +278,7 @@ function CartPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin className="size-4 text-primary shrink-0" />
-                  <span>Hostel room delivery or central pickup</span>
+                  <span>Doorstep delivery or counter pickup</span>
                 </div>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import {
   User,
@@ -34,9 +34,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCustomerAuth, type CustomerOrderSummary } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
-import { formatINR, BRAND_NAME, CAMPUS_NAME } from "@/data/products";
+import { formatINR, BRAND_NAME } from "@/data/products";
 import { resolveOrderItemImage, BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
 import { isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
+import { GoogleSignInButton, AuthDivider } from "@/components/auth/GoogleSignInButton";
+import { getSafeRedirectUrl } from "@/lib/auth-helpers";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -46,12 +48,12 @@ export const Route = createFileRoute("/account")({
       { title: `My Account — ${BRAND_NAME}` },
       {
         name: "description",
-        content: `Manage your ${BRAND_NAME} student profile, saved campus delivery address, and track order history.`,
+        content: `Manage your ${BRAND_NAME} profile, saved delivery address, and track order history.`,
       },
       { property: "og:title", content: `My Account — ${BRAND_NAME}` },
       {
         property: "og:description",
-        content: `Manage your ${BRAND_NAME} student profile, saved campus delivery address, and track order history.`,
+        content: `Manage your ${BRAND_NAME} profile, saved delivery address, and track order history.`,
       },
     ],
   }),
@@ -90,6 +92,13 @@ function AccountPage() {
     useCustomerAuth();
 
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Search parameters for returnTo and OAuth errors
+  const searchParams = new URLSearchParams(location.search);
+  const rawReturnTo = searchParams.get("returnTo");
+  const returnTo = rawReturnTo ? getSafeRedirectUrl(rawReturnTo, "/account") : undefined;
+  const oauthError = searchParams.get("error");
 
   // Auth tab: "signin" | "signup" | "forgot"
   const [authTab, setAuthTab] = useState<"signin" | "signup" | "forgot">("signin");
@@ -127,6 +136,13 @@ function AccountPage() {
       }
     }
   }, [location.search]);
+
+  // If user is already authenticated and a validated returnTo target exists, navigate there
+  useEffect(() => {
+    if (user && returnTo && returnTo !== "/account") {
+      navigate({ to: returnTo as any, replace: true });
+    }
+  }, [user, returnTo, navigate]);
 
   const handleTabChange = (val: string) => {
     setActiveTab(val);
@@ -286,6 +302,9 @@ function AccountPage() {
       setSignInError(res.error || "Unable to sign in.");
     } else {
       setSignUpConfirmationEmail(null);
+      if (returnTo && returnTo !== "/account") {
+        navigate({ to: returnTo as any, replace: true });
+      }
     }
   };
 
@@ -417,10 +436,10 @@ function AccountPage() {
               <User className="size-6" />
             </span>
             <h1 className="mt-3 font-display text-2xl font-extrabold sm:text-3xl text-foreground">
-              {branding.store_name} Student Account
+              {branding.store_name} Account
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sign in or create an account for 1-click hostel delivery and order history across {CAMPUS_NAME}.
+              Sign in or create an account for fast 1-click checkout and complete order history.
             </p>
           </div>
 
@@ -442,7 +461,7 @@ function AccountPage() {
               <div>
                 <h2 className="font-display text-lg font-bold text-foreground">Reset Password</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Enter your registered campus email address and we'll send you recovery instructions.
+                  Enter your registered email address and we'll send you recovery instructions.
                 </p>
 
                 {forgotSuccess ? (
@@ -480,7 +499,7 @@ function AccountPage() {
                         required
                         value={forgotEmail}
                         onChange={(e) => setForgotEmail(e.target.value)}
-                        placeholder="student@dhuniversity.edu"
+                        placeholder="you@example.com"
                         className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
                       />
                     </div>
@@ -510,6 +529,13 @@ function AccountPage() {
 
                 {/* SIGN IN TAB */}
                 <TabsContent value="signin" className="mt-5 space-y-4">
+                  {oauthError && (
+                    <div className="flex items-center gap-2 rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
+                      <AlertCircle className="size-4 shrink-0" />
+                      <span>{oauthError}</span>
+                    </div>
+                  )}
+
                   {signUpConfirmationEmail && (
                     <div className="flex items-start gap-2.5 rounded-2xl border border-emerald-600/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-800 dark:text-emerald-200">
                       <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
@@ -529,6 +555,11 @@ function AccountPage() {
                     </div>
                   )}
 
+                  {/* Google OAuth Sign-In Option */}
+                  <GoogleSignInButton returnTo={returnTo} />
+
+                  <AuthDivider text="or continue with email" />
+
                   <form onSubmit={handleSignIn} className="space-y-4">
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-foreground">Email Address</label>
@@ -539,7 +570,7 @@ function AccountPage() {
                           required
                           value={signInEmail}
                           onChange={(e) => setSignInEmail(e.target.value)}
-                          placeholder="student@dhuniversity.edu"
+                          placeholder="you@example.com"
                           className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
                         />
                       </div>
@@ -577,12 +608,24 @@ function AccountPage() {
 
                 {/* SIGN UP TAB */}
                 <TabsContent value="signup" className="mt-5 space-y-4">
+                  {oauthError && (
+                    <div className="flex items-center gap-2 rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
+                      <AlertCircle className="size-4 shrink-0" />
+                      <span>{oauthError}</span>
+                    </div>
+                  )}
+
                   {signUpError && (
                     <div className="flex items-center gap-2 rounded-xl bg-destructive/10 p-3 text-xs text-destructive">
                       <AlertCircle className="size-4 shrink-0" />
                       <span>{signUpError}</span>
                     </div>
                   )}
+
+                  {/* Google OAuth Registration Option */}
+                  <GoogleSignInButton returnTo={returnTo} text="Sign up with Google" />
+
+                  <AuthDivider text="or register with email" />
 
                   <form onSubmit={handleSignUp} className="space-y-4">
                     <div>
@@ -598,13 +641,13 @@ function AccountPage() {
                     </div>
 
                     <div>
-                      <label className="mb-1 block text-xs font-semibold text-foreground">Campus Email *</label>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">Email Address *</label>
                       <input
                         type="email"
                         required
                         value={signUpEmail}
                         onChange={(e) => setSignUpEmail(e.target.value)}
-                        placeholder="student@dhuniversity.edu"
+                        placeholder="you@example.com"
                         className="h-11 w-full rounded-xl border border-input bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30"
                       />
                     </div>
@@ -633,9 +676,9 @@ function AccountPage() {
                     </div>
 
                     <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-3">
-                      <p className="text-xs font-bold text-foreground">Hostel Delivery Details (Optional)</p>
+                      <p className="text-xs font-bold text-foreground">Delivery Address Details (Optional)</p>
                       <div>
-                        <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">Hostel</label>
+                        <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">Hostel / Area</label>
                         <select
                           value={signUpHostel}
                           onChange={(e) => setSignUpHostel(e.target.value)}
@@ -699,16 +742,24 @@ function AccountPage() {
       {/* Account Profile Header Card */}
       <div className="mt-4 flex flex-col gap-4 rounded-3xl border border-border bg-card p-6 shadow-soft sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary font-display text-xl font-black">
-            {userInitial}
-          </div>
+          {profile?.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt={profile?.full_name || "Account avatar"}
+              className="size-14 rounded-2xl object-cover ring-2 ring-primary/20 shadow-xs"
+            />
+          ) : (
+            <div className="grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary font-display text-xl font-black">
+              {userInitial}
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-display text-xl font-bold text-foreground sm:text-2xl">
-                {profile?.full_name || "Campus Customer"}
+                {profile?.full_name || "Customer"}
               </h1>
               <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 text-xs">
-                Student
+                Customer
               </Badge>
             </div>
             <p className="text-xs text-muted-foreground">{user.email}</p>
@@ -759,7 +810,7 @@ function AccountPage() {
               <ShoppingBag className="mx-auto size-12 text-primary/40" />
               <h3 className="mt-3 font-display text-lg font-bold">No orders placed yet</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Browse our snacks, stationery, and hostel essentials to place your first campus delivery!
+                Browse our snacks, stationery, and everyday essentials to place your first delivery!
               </p>
               <Button asChild variant="hero" className="mt-5 h-10 px-6 text-xs">
                 <Link to="/">Browse Catalogue</Link>
@@ -867,7 +918,7 @@ function AccountPage() {
                           <MapPin className="size-3.5 text-primary shrink-0" />
                           <span>
                             {order.delivery_method === "hostel_delivery"
-                              ? `Hostel: ${order.hostel || "Campus"}${order.block ? ` - ${order.block}` : ""}${order.room ? `, Room ${order.room}` : ""}`
+                              ? `Delivery: ${order.hostel || "Doorstep"}${order.block ? ` - ${order.block}` : ""}${order.room ? `, ${order.room}` : ""}`
                               : `Pickup: ${order.pickup_location || "Central Hub"}`}
                           </span>
                         </div>
@@ -1080,18 +1131,18 @@ function AccountPage() {
                         </div>
                         <p className="text-sm font-bold text-foreground">
                           {selectedOrder.delivery_method === "hostel_delivery"
-                            ? "Hostel Room Delivery"
-                            : "Campus Pickup"}
+                            ? "Doorstep Delivery"
+                            : "Store Pickup"}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {selectedOrder.delivery_method === "hostel_delivery" ? (
                             <>
-                              {selectedOrder.hostel || "Campus Hostel"}
+                              {selectedOrder.hostel || "Delivery Address"}
                               {selectedOrder.block ? `, ${selectedOrder.block}` : ""}
-                              {selectedOrder.room ? ` (Room ${selectedOrder.room})` : ""}
+                              {selectedOrder.room ? ` (${selectedOrder.room})` : ""}
                             </>
                           ) : (
-                            selectedOrder.pickup_location || "Central Campus Hub"
+                            selectedOrder.pickup_location || "Central Dispatch Point"
                           )}
                         </p>
                         {selectedOrder.delivery_instructions && (
@@ -1121,7 +1172,7 @@ function AccountPage() {
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Delivery:</span>
-                            <span className="font-semibold text-primary">Free on Campus</span>
+                            <span className="font-semibold text-primary">Free</span>
                           </div>
                           <div className="flex justify-between font-bold text-sm pt-1 text-foreground border-t border-border/60">
                             <span>Total Amount:</span>
@@ -1189,10 +1240,10 @@ function AccountPage() {
                       <div>
                         <p className="font-bold">
                           {trackOrderModal.delivery_method === "hostel_delivery"
-                            ? `Delivering to ${trackOrderModal.hostel || "Hostel"} ${trackOrderModal.room ? `Room ${trackOrderModal.room}` : ""}`
-                            : `Campus Pickup at ${trackOrderModal.pickup_location || "Central Hub"}`}
+                            ? `Delivering to ${trackOrderModal.hostel || "Doorstep"} ${trackOrderModal.room ? `(${trackOrderModal.room})` : ""}`
+                            : `Store Pickup at ${trackOrderModal.pickup_location || "Central Hub"}`}
                         </p>
-                        <p className="text-[11px] text-muted-foreground">Campus delivery team is servicing your request.</p>
+                        <p className="text-[11px] text-muted-foreground">Local delivery team is servicing your request.</p>
                       </div>
                     </div>
 
@@ -1291,9 +1342,9 @@ function AccountPage() {
         {/* SAVED DELIVERY DETAILS TAB */}
         <TabsContent value="profile" className="mt-6">
           <div className="max-w-xl rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
-            <h2 className="font-display text-lg font-bold text-foreground">Campus Delivery Address</h2>
+            <h2 className="font-display text-lg font-bold text-foreground">Saved Delivery Address</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              These details will automatically fill your checkout form for rapid delivery to your room.
+              These details will automatically fill your checkout form for rapid delivery to your door.
             </p>
 
             <form onSubmit={handleSaveProfile} className="mt-6 space-y-4">
@@ -1320,7 +1371,7 @@ function AccountPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-foreground">Primary Hostel</label>
+                <label className="mb-1 block text-xs font-semibold text-foreground">Hostel / Area</label>
                 <select
                   value={editHostel}
                   onChange={(e) => setEditHostel(e.target.value)}

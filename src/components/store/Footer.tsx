@@ -15,7 +15,7 @@ export function Footer() {
       <div className="container-page grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-4">
         <div className="lg:col-span-2">
           <Logo />
-          <p className="mt-3 max-w-sm text-sm text-muted-foreground">{branding.tagline} Everyday essentials delivered straight to your hostel room at Darul Huda University.</p>
+          <p className="mt-3 max-w-sm text-sm text-muted-foreground">{branding.tagline} Everyday essentials delivered straight to your doorstep fast.</p>
         </div>
         <div>
           <h3 className="font-sans text-sm font-bold">Shop</h3>

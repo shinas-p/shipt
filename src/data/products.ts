@@ -12,9 +12,9 @@ import cable from "@/assets/p-cable.jpg";
 import detergent from "@/assets/p-detergent.jpg";
 import highlighter from "@/assets/p-highlighter.jpg";
 
-export const BRAND_NAME = "Shipt";
-export const BRAND_TAGLINE = "Your Campus. Your Marketplace.";
-export const CAMPUS_NAME = "Darul Huda University";
+export const BRAND_NAME = "Shipt Mart";
+export const BRAND_TAGLINE = "Everyday Essentials. Delivered Fast.";
+export const CAMPUS_NAME = "Shipt Mart";
 
 export const categories: Category[] = [
   { id: "snacks", name: "Snacks & Drinks", blurb: "Late-night fuel" },
@@ -60,7 +60,7 @@ export const products: Product[] = [
   { id: "toothpaste-mint", slug: "toothpaste-mint", name: "Mint Toothpaste", size: "100 g", description: "Fresh mint fluoride toothpaste for everyday use.", price: 55, category: "personal-care", image: toothpaste, stock: 15 },
   { id: "soap-herbal", slug: "soap-herbal", name: "Herbal Bathing Soap", size: "100 g", description: "Gentle herbal soap bar with a fresh scent.", price: 40, category: "personal-care", image: soap, stock: 22, isNew: true },
   { id: "cable-usbc", slug: "cable-usbc", name: "USB-C Charging Cable", size: "1 m", description: "Durable USB-C to USB-C cable for phones and tablets.", price: 199, originalPrice: 249, category: "electronics", image: cable, stock: 6, isNew: true },
-  { id: "detergent-sachet", slug: "detergent-sachet", name: "Detergent Sachets", size: "Pack of 3", description: "Single-wash detergent powder sachets — easy for hostel laundry.", price: 30, category: "hostel", image: detergent, stock: 3, isNew: true },
+  { id: "detergent-sachet", slug: "detergent-sachet", name: "Detergent Sachets", size: "Pack of 3", description: "Single-wash detergent powder sachets — easy for quick everyday laundry.", price: 30, category: "hostel", image: detergent, stock: 3, isNew: true },
   { id: "highlighter-4", slug: "highlighter-4", name: "Highlighter Set", size: "4 colours", description: "Bright chisel-tip highlighters for revision season.", price: 90, category: "exam", image: highlighter, stock: 12, isNew: true },
 ];
 

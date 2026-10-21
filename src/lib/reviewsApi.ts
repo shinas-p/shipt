@@ -27,7 +27,7 @@ const DEFAULT_INITIAL_REVIEWS: ProductReview[] = [
     product_id: "p-notebook",
     user_id: "demo-user-1",
     rating: 5,
-    review_text: "Smooth pages and sturdy binding. Ideal for lecture notes at DHU. Delivered to Kaveri Hostel in 15 minutes!",
+    review_text: "Smooth pages and sturdy binding. Ideal for everyday notes. Delivered to my door in 15 minutes!",
     customer_name: "Ahmad K.",
     created_at: "2026-10-10T14:20:00Z",
     updated_at: "2026-10-10T14:20:00Z",
@@ -60,7 +60,7 @@ const DEFAULT_INITIAL_REVIEWS: ProductReview[] = [
     product_id: "p-biscuits",
     user_id: "demo-user-4",
     rating: 5,
-    review_text: "Late night study session lifesaver! Fresh and crispy, chocolate chips are delicious with hostel tea.",
+    review_text: "Late night study session lifesaver! Fresh and crispy, chocolate chips are delicious with evening tea.",
     customer_name: "Zayan T.",
     created_at: "2026-10-13T23:15:00Z",
     updated_at: "2026-10-13T23:15:00Z",
@@ -71,7 +71,7 @@ const DEFAULT_INITIAL_REVIEWS: ProductReview[] = [
     product_id: "p-chips",
     user_id: "demo-user-5",
     rating: 4,
-    review_text: "Good spicy flavor. Arrived super fast at Ganga Hostel Room 204.",
+    review_text: "Good spicy flavor. Arrived super fast at my door.",
     customer_name: "Faris N.",
     created_at: "2026-10-14T19:30:00Z",
     updated_at: "2026-10-14T19:30:00Z",
@@ -280,7 +280,7 @@ export async function submitProductReview(params: {
       verified = await checkVerifiedPurchaser(productId, currentUserId);
 
       // Sanitize customer display name safely (never expose email or tokens)
-      const safeName = customerName?.trim() || "Campus Student";
+      const safeName = customerName?.trim() || "Customer";
 
       // Attempt Supabase insert
       const { data, error } = await supabase
@@ -324,7 +324,7 @@ export async function submitProductReview(params: {
     user_id: currentUserId || "local-current-user",
     rating: intRating,
     review_text: trimmedText,
-    customer_name: customerName?.trim() || "Campus Student",
+    customer_name: customerName?.trim() || "Customer",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     is_verified_purchaser: verified,

@@ -190,11 +190,11 @@ export function OpeningLogoAnimation() {
           </p>
         </div>
 
-        {/* Delicate Campus Accent Indicator */}
+        {/* Delicate Accent Indicator */}
         <div className="animate-shipt-tagline-reveal mt-5 flex items-center gap-2">
           <span className="size-1.5 rounded-full bg-primary" />
           <span className="text-[11px] font-medium text-primary/80 tracking-wide">
-            Darul Huda Campus Store
+            Everyday Essentials Store
           </span>
           <span className="size-1.5 rounded-full bg-primary" />
         </div>

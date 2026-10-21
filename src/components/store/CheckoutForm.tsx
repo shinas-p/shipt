@@ -31,9 +31,9 @@ const HOSTELS = [
 ];
 
 const PICKUP_LOCATIONS = [
-  "Shipt Central Hub — Darul Huda Main Gate",
-  "Library Ground Floor Pickup Kiosk",
-  "Hostel Complex C Dispatch Point",
+  "Shipt Mart Hub — Central Dispatch Point",
+  "North Wing Pickup Kiosk",
+  "Main Express Counter",
 ];
 
 type Errors = Partial<Record<keyof CheckoutFormData, string>>;
@@ -45,11 +45,11 @@ function validate(f: CheckoutFormData): Errors {
     e.phone = "Enter a valid 10-digit mobile number.";
 
   if (f.deliveryMethod === "hostel_delivery") {
-    if (!f.hostel) e.hostel = "Select your hostel.";
+    if (!f.hostel) e.hostel = "Select your hostel or building.";
     if (!f.block.trim()) e.block = "Enter your block or building.";
     if (!f.room.trim()) e.room = "Enter your room number.";
   } else {
-    if (!f.pickupLocation) e.pickupLocation = "Select a campus pickup location.";
+    if (!f.pickupLocation) e.pickupLocation = "Select a pickup location.";
   }
 
   return e;
@@ -182,7 +182,7 @@ export function CheckoutForm() {
                 Order Number
               </span>
               <p className="font-mono text-base font-extrabold text-foreground">{done.order_number}</p>
-              <p className="text-[11px] text-muted-foreground">Reference identifier for campus delivery staff.</p>
+              <p className="text-[11px] text-muted-foreground">Reference identifier for delivery staff.</p>
             </div>
             <Button
               type="button"
@@ -254,7 +254,7 @@ export function CheckoutForm() {
               <div className="flex-1">
                 <h3 className="text-sm font-bold text-foreground">Save your details for future orders</h3>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Create a free Shipt account to save your hostel room number for 1-click checkout, view past campus orders, and get ready for future student rewards.
+                  Create a free Shipt Mart account to save your delivery address for 1-click checkout, view past orders, and track deliveries.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Button asChild variant="default" size="sm" className="gap-1.5 h-9 px-4 text-xs font-semibold">
@@ -303,7 +303,7 @@ export function CheckoutForm() {
         <ShoppingBag className="mx-auto size-12 text-primary" />
         <h2 className="mt-3 font-display text-xl font-bold">Your cart is empty</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Add a few campus essentials before proceeding to checkout.
+          Add a few essentials before proceeding to checkout.
         </p>
         <Button asChild variant="hero" className="mt-5 h-11 px-6">
           <Link to="/">Browse products</Link>
@@ -366,7 +366,7 @@ export function CheckoutForm() {
             <div className="flex items-center gap-2 text-foreground">
               <CheckCircle2 className="size-4 text-primary shrink-0" />
               <span>
-                Signed in as <strong>{profile?.full_name || user.email}</strong>. Saved hostel details auto-applied.
+                Signed in as <strong>{profile?.full_name || user.email}</strong>. Saved delivery details auto-applied.
               </span>
             </div>
             <Link to="/account" className="font-semibold text-primary hover:underline text-xs shrink-0 ml-2">
@@ -435,9 +435,9 @@ export function CheckoutForm() {
                 <Building className="size-5" />
               </span>
               <span>
-                <span className="block font-semibold">Hostel Room Delivery</span>
+                <span className="block font-semibold">Doorstep Delivery</span>
                 <span className="block text-xs text-muted-foreground">
-                  Direct delivery to your room door
+                  Direct delivery straight to your door
                 </span>
               </span>
             </label>
@@ -462,9 +462,9 @@ export function CheckoutForm() {
                 <MapPin className="size-5" />
               </span>
               <span>
-                <span className="block font-semibold">Campus Pickup</span>
+                <span className="block font-semibold">Store / Counter Pickup</span>
                 <span className="block text-xs text-muted-foreground">
-                  Pick up at main gate or store hub
+                  Pick up at our local central hub or kiosk
                 </span>
               </span>
             </label>
@@ -473,14 +473,14 @@ export function CheckoutForm() {
           {/* Conditional Delivery Inputs */}
           {f.deliveryMethod === "hostel_delivery" ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-2 border-t border-border/60 pt-4">
-              <Field id="hostel" label="Hostel" error={errors.hostel}>
+              <Field id="hostel" label="Hostel / Building" error={errors.hostel}>
                 <select
                   {...a("hostel")}
                   className={inputCls}
                   value={f.hostel}
                   onChange={(e) => set("hostel", e.target.value)}
                 >
-                  <option value="">Select hostel</option>
+                  <option value="">Select hostel or building</option>
                   {HOSTELS.map((h) => (
                     <option key={h} value={h}>
                       {h}
@@ -517,7 +517,7 @@ export function CheckoutForm() {
                     className={cn(inputCls, "h-20 py-2.5")}
                     value={f.instructions}
                     onChange={(e) => set("instructions", e.target.value)}
-                    placeholder="e.g. Call when outside or leave with the hostel warden"
+                    placeholder="e.g. Call upon arrival or leave at front door / reception"
                   />
                 </Field>
               </div>
@@ -606,7 +606,7 @@ export function CheckoutForm() {
             <p>
               {f.payment === "upi"
                 ? "💡 Payment Collection Note: A QR code will be provided by delivery staff or at the counter upon order arrival."
-                : "💡 Cash Notice: Please keep exact change ready for smooth handover at your hostel."}
+                : "💡 Cash Notice: Please keep exact change ready for smooth handover at your door."}
             </p>
           </div>
         </fieldset>
@@ -644,7 +644,7 @@ export function CheckoutForm() {
           </div>
           <div className="flex justify-between text-muted-foreground">
             <span>Delivery fee</span>
-            <span className="text-primary font-medium">Free (Campus)</span>
+            <span className="text-primary font-medium">Free</span>
           </div>
           <div className="flex justify-between border-t border-border/60 pt-2 text-base font-bold text-foreground">
             <span>Total amount</span>

@@ -31,7 +31,7 @@ export const Route = createFileRoute("/product/$productId")({
   head: ({ params }) => ({
     meta: [
       { title: `Product Details — ${BRAND_NAME}` },
-      { name: "description", content: `View product specifications, campus hostel delivery options, and customer reviews on ${BRAND_NAME}.` },
+      { name: "description", content: `View product specifications, fast delivery options, and customer reviews on ${BRAND_NAME}.` },
     ],
   }),
   component: ProductDetailPage,
@@ -373,19 +373,19 @@ function ProductDetailPage() {
             ) : (
               <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
                 <Check className="size-4" />
-                <span>In Stock — Ready for instant campus dispatch</span>
+                <span>In Stock — Ready for instant dispatch</span>
               </div>
             )}
           </div>
 
-          {/* Campus Hostel Delivery Banner */}
+          {/* Fast Doorstep Delivery Banner */}
           <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-3.5 text-xs text-foreground/90">
             <div className="flex items-center gap-2 font-bold text-primary">
               <MapPin className="size-4 shrink-0" />
-              <span>Campus Hostel Delivery Guarantee</span>
+              <span>Fast Doorstep Delivery Guarantee</span>
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-              Order now for swift delivery to your room in <strong>Ganga, Yamuna, Kaveri, Narmada</strong>, or <strong>International House</strong>.
+              Order now for swift local delivery straight to your doorstep or convenient store counter pickup.
             </p>
           </div>
 
@@ -395,7 +395,7 @@ function ProductDetailPage() {
               About This Item
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-foreground/85 whitespace-pre-line">
-              {product.description || "Essential item curated for Darul Huda students and faculty."}
+              {product.description || "Essential everyday item curated for quality and value."}
             </p>
           </div>
 

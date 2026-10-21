@@ -183,7 +183,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
             Customer Reviews & Ratings
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Authentic feedback from students and staff across Darul Huda campus.
+            Authentic feedback from verified customers.
           </p>
         </div>
 

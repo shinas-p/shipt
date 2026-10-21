@@ -27,12 +27,12 @@ export const Route = createFileRoute("/wishlist")({
       { title: `My Wishlist — ${BRAND_NAME}` },
       {
         name: "description",
-        content: `View and manage your saved campus essentials at ${CAMPUS_NAME}. Quick order anytime.`,
+        content: `View and manage your saved items on ${BRAND_NAME}. Quick order anytime.`,
       },
       { property: "og:title", content: `My Wishlist — ${BRAND_NAME}` },
       {
         property: "og:description",
-        content: `Your saved items on Shipt — Darul Huda University's official student marketplace.`,
+        content: `Your saved items on ${BRAND_NAME} — fast and reliable ordering anytime.`,
       },
     ],
   }),
@@ -159,7 +159,7 @@ export function WishlistPage() {
                   My Saved Wishlist
                 </h1>
                 <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-                  Your handpicked essentials ready for quick hostel delivery across {CAMPUS_NAME}.
+                  Your handpicked essentials ready for quick doorstep delivery.
                 </p>
               </div>
             </div>
@@ -211,7 +211,7 @@ export function WishlistPage() {
             </div>
             <h2 className="font-display text-xl font-bold text-foreground">Your wishlist is empty</h2>
             <p className="mt-2 text-xs sm:text-sm text-muted-foreground leading-relaxed">
-              Explore the campus storefront and tap the heart icon on notebooks, snacks, toiletries, or hostel essentials to save them for quick access later.
+              Explore our catalogue and tap the heart icon on snacks, stationery, toiletries, and daily essentials to save them for quick access later.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <Button asChild variant="hero" className="font-bold text-xs h-10 px-6 shadow-soft">
@@ -235,7 +235,7 @@ export function WishlistPage() {
                 Showing <strong className="text-foreground">{savedProducts.length}</strong> saved product{savedProducts.length !== 1 ? "s" : ""}
               </span>
               <span className="hidden sm:inline">
-                Hostel delivery in 15–30 minutes at DHU
+                Fast local delivery in 15–30 minutes
               </span>
             </div>
 

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
+import { getSafeRedirectUrl, getOAuthCallbackUrl } from "@/lib/auth-helpers";
 import { toast } from "sonner";
 
 export interface CustomerProfile {
@@ -62,6 +63,7 @@ interface AuthContextType {
   profile: CustomerProfile | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signInWithGoogle: (options?: { returnTo?: string | undefined }) => Promise<{ success: boolean; error?: string }>;
   signUp: (
     email: string,
     password: string,
@@ -89,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string, authUser?: User | null) => {
     if (!isSupabaseConfigured) return;
     try {
       const { data, error } = await supabase
@@ -98,13 +100,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq("id", userId)
         .maybeSingle();
 
+      // Extract OAuth metadata safely if available
+      const meta = (authUser?.user_metadata || {}) as Record<string, any>;
+      const oauthName = ((meta["full_name"] || meta["name"] || "") as string).trim();
+      const oauthAvatar = ((meta["avatar_url"] || meta["picture"] || "") as string).trim();
+
       if (!error && data) {
-        setProfile(data as CustomerProfile);
+        // User already has a profile record.
+        // Preserve all edited fields: only fill full_name or avatar_url if currently null/empty in DB
+        let needsUpdate = false;
+        const updates: Partial<CustomerProfile> = {};
+
+        if (!data.full_name && oauthName) {
+          updates.full_name = oauthName;
+          needsUpdate = true;
+        }
+        if (!data.avatar_url && oauthAvatar) {
+          updates.avatar_url = oauthAvatar;
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          const { data: updated } = await supabase
+            .from("profiles")
+            .update(updates)
+            .eq("id", userId)
+            .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+            .maybeSingle();
+          setProfile((updated || { ...data, ...updates }) as CustomerProfile);
+        } else {
+          setProfile(data as CustomerProfile);
+        }
       } else if (!data && !error) {
-        // Safe profile synchronization: create empty profile if missing
+        // Safe initial profile synchronization: create profile record using OAuth metadata
+        const initialPayload: { id: string; full_name?: string | null; avatar_url?: string | null } = {
+          id: userId,
+        };
+        if (oauthName) initialPayload.full_name = oauthName;
+        if (oauthAvatar) initialPayload.avatar_url = oauthAvatar;
+
         const { data: newProf } = await supabase
           .from("profiles")
-          .upsert({ id: userId }, { onConflict: "id" })
+          .upsert(initialPayload, { onConflict: "id" })
           .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
           .maybeSingle();
         if (newProf) {
@@ -131,7 +168,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setSession(data.session);
           setUser(data.session?.user ?? null);
           if (data.session?.user) {
-            await fetchProfile(data.session.user.id);
+            await fetchProfile(data.session.user.id, data.session.user);
           }
         }
       } finally {
@@ -165,7 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
-        await fetchProfile(newSession.user.id);
+        await fetchProfile(newSession.user.id, newSession.user);
       } else {
         setProfile(null);
       }
@@ -208,12 +245,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
       setSession(data.session);
       if (data.user) {
-        await fetchProfile(data.user.id);
+        await fetchProfile(data.user.id, data.user);
       }
       toast.success("Welcome back to Shipt!");
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || "Failed to sign in." };
+    }
+  };
+
+  const signInWithGoogle = async (options?: { returnTo?: string | undefined }) => {
+    if (!isSupabaseConfigured) {
+      const { missing } = validateSupabaseConfig();
+      return {
+        success: false,
+        error: `Supabase authentication is not configured in this environment (missing ${missing.join(", ")}). Please add these variables in your Vercel Project Settings.`,
+      };
+    }
+
+    try {
+      const safeReturnTo = getSafeRedirectUrl(options?.returnTo, "/account");
+
+      // Save returnTo in sessionStorage for extra resilience across browser redirect quirks
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem("shipt_oauth_return_to", safeReturnTo);
+        } catch {
+          // Ignore storage restrictions
+        }
+      }
+
+      const redirectTo = getOAuthCallbackUrl(safeReturnTo);
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          queryParams: {
+            access_type: "offline",
+            prompt: "select_account",
+          },
+        },
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err?.message || "Failed to initiate Google sign-in.",
+      };
     }
   };
 
@@ -396,7 +480,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: error.message };
       }
 
-      await fetchProfile(user.id);
+      await fetchProfile(user.id, user);
       toast.success("Delivery details saved!");
       return { success: true };
     } catch (err: any) {
@@ -404,11 +488,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
-      await fetchProfile(user.id);
+      await fetchProfile(user.id, user);
     }
-  };
+  }, [user, fetchProfile]);
 
   const fetchCustomerOrders = async (): Promise<CustomerOrderSummary[]> => {
     if (!user || !isSupabaseConfigured) return [];
@@ -470,6 +554,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         isLoading,
         signIn,
+        signInWithGoogle,
         signUp,
         signOut,
         resetPassword,

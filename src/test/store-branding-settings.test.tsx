@@ -251,7 +251,7 @@ describe("Shipt — Store Branding & App Identity Suite", () => {
     );
 
     // Announcement bar contains tagline
-    expect(screen.getByText(/Fast delivery across Darul Huda University/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fast doorstep delivery/i)).toBeInTheDocument();
     // Footer contains copyright with current year
     expect(screen.getByText(new RegExp(`© ${new Date().getFullYear()}`, "i"))).toBeInTheDocument();
   });
