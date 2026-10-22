@@ -7,7 +7,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
 /**
@@ -439,6 +439,7 @@ Deno.serve(async (req: Request) => {
           email: cleanEmail,
           fullName: cleanFullName,
           role: requestedRole,
+          assigned_block: assignedBlock,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
