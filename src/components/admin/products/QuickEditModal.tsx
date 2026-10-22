@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
-import { Loader2, Check } from "lucide-react";
+import { Loader2, Check, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import { formatINR } from "@/data/products";
+import { calculateProfitMetrics, fetchProductCost, saveProductCost } from "@/lib/profitability";
+import { canManageCosts, type AdminRole } from "@/lib/permissions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { DBProduct } from "./types";
@@ -11,6 +14,7 @@ interface QuickEditModalProps {
   product: DBProduct | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  adminRole?: AdminRole | null;
   onSuccess: () => Promise<void>;
 }
 
@@ -18,8 +22,10 @@ export function QuickEditModal({
   product,
   open,
   onOpenChange,
+  adminRole,
   onSuccess,
 }: QuickEditModalProps) {
+  const canSeeCosts = adminRole === undefined ? true : canManageCosts(adminRole);
   const [name, setName] = useState("");
   const [size, setSize] = useState("");
   const [price, setPrice] = useState("");
@@ -28,6 +34,11 @@ export function QuickEditModal({
   const [isActive, setIsActive] = useState(true);
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Private Supplier Cost state
+  const [supplierCost, setSupplierCost] = useState("");
+  const [otherCosts, setOtherCosts] = useState("");
+  const [loadingCost, setLoadingCost] = useState(false);
 
   useEffect(() => {
     if (product) {
@@ -38,8 +49,30 @@ export function QuickEditModal({
       setStock(String(product.stock));
       setIsActive(product.is_active);
       setReason("");
+
+      // Fetch private supplier cost (Super Admin & Owner only)
+      if (canSeeCosts) {
+        setLoadingCost(true);
+        fetchProductCost(product.id)
+          .then((c) => {
+            if (c) {
+              setSupplierCost(c.supplier_cost > 0 ? String(c.supplier_cost) : "");
+              setOtherCosts(c.other_costs > 0 ? String(c.other_costs) : "");
+            } else {
+              setSupplierCost("");
+              setOtherCosts("");
+            }
+          })
+          .catch(() => {
+            setSupplierCost("");
+            setOtherCosts("");
+          })
+          .finally(() => setLoadingCost(false));
+      }
     }
   }, [product]);
+
+  const profitMetrics = calculateProfitMetrics(price, supplierCost, otherCosts);
 
   if (!product) return null;
 
@@ -62,6 +95,18 @@ export function QuickEditModal({
 
     if (origPriceNum !== null && (isNaN(origPriceNum) || origPriceNum < priceNum)) {
       toast.error("Original price must be greater than or equal to selling price.");
+      return;
+    }
+
+    const supplierCostNum = supplierCost.trim() ? parseFloat(supplierCost) : 0;
+    if (supplierCost.trim() && (isNaN(supplierCostNum) || supplierCostNum < 0)) {
+      toast.error("Supplier cost must be a non-negative number.");
+      return;
+    }
+
+    const otherCostsNum = otherCosts.trim() ? parseFloat(otherCosts) : 0;
+    if (otherCosts.trim() && (isNaN(otherCostsNum) || otherCostsNum < 0)) {
+      toast.error("Other costs must be a non-negative number.");
       return;
     }
 
@@ -100,6 +145,13 @@ export function QuickEditModal({
             performed_by: session?.user?.id ?? null,
           },
         ]);
+      }
+
+      // Save supplier cost (Super Admin & Owner only)
+      if (canSeeCosts && (supplierCost.trim() || otherCosts.trim())) {
+        const cleanSupplier = Math.max(0, supplierCostNum);
+        const cleanOther = Math.max(0, otherCostsNum);
+        await saveProductCost(product.id, cleanSupplier, cleanOther);
       }
 
       toast.success(`Quick update saved for "${name}"!`);
@@ -202,6 +254,58 @@ export function QuickEditModal({
                 placeholder="e.g. Warehouse count reconciliation / shipment received"
                 className="h-9 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
               />
+            </div>
+          )}
+
+          {/* PRIVATE SUPPLIER COST (SUPER ADMIN & OWNER ONLY) */}
+          {canSeeCosts && (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                  <Lock className="size-3.5 text-emerald-600" />
+                  <span>Supplier Cost (Private)</span>
+                </div>
+                {loadingCost && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+                    Supplier Cost (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={supplierCost}
+                    onChange={(e) => setSupplierCost(e.target.value)}
+                    placeholder="e.g. 40"
+                    className="h-8 w-full rounded-xl border border-input bg-card px-2.5 text-xs font-mono font-bold outline-none focus:border-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+                    Other Costs (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={otherCosts}
+                    onChange={(e) => setOtherCosts(e.target.value)}
+                    placeholder="Optional"
+                    className="h-8 w-full rounded-xl border border-input bg-card px-2.5 text-xs font-mono outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg bg-background/80 px-2.5 py-1.5 text-[11px] font-mono border border-border/60">
+                <span className="text-muted-foreground">Est. Profit / Margin:</span>
+                <span className={cn("font-bold", profitMetrics.isLoss ? "text-rose-600" : "text-emerald-600")}>
+                  {formatINR(profitMetrics.estimatedProfit)} ({profitMetrics.profitMarginPct.toFixed(1)}% margin)
+                </span>
+              </div>
             </div>
           )}
 

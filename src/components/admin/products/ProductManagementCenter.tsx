@@ -8,6 +8,7 @@ import {
   Boxes,
   Plus,
   RefreshCw,
+  Coins,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,18 +23,20 @@ import { BulkOperationModal } from "./BulkOperationModal";
 import { CategoriesTab } from "./CategoriesTab";
 import { InventoryLedgerTab } from "./InventoryLedgerTab";
 import { PricingPromotionsTab } from "./PricingPromotionsTab";
+import { ProfitabilityTab } from "./ProfitabilityTab";
 import { ImportExportTab } from "./ImportExportTab";
 import { ProductReportsTab } from "./ProductReportsTab";
+import { canManageCosts, type AdminRole } from "@/lib/permissions";
 
 interface ProductManagementCenterProps {
   products: DBProduct[];
   categories: DBCategory[];
   orders: any[];
-  adminRole: "super_admin" | "store_manager" | null;
+  adminRole: AdminRole | null;
   productsLoading: boolean;
   onRefreshProducts: () => Promise<void>;
   onRefreshCategories: () => Promise<void>;
-  initialTab?: "catalog" | "categories" | "inventory" | "pricing" | "import_export" | "reports";
+  initialTab?: "catalog" | "categories" | "inventory" | "pricing" | "profitability" | "import_export" | "reports";
   onAddNewProduct?: () => void;
 }
 
@@ -47,17 +50,22 @@ export function ProductManagementCenter({
   onRefreshCategories,
   initialTab = "catalog",
 }: ProductManagementCenterProps) {
-  // Center Sub-tabs: 'catalog' | 'categories' | 'inventory' | 'pricing' | 'import_export' | 'reports'
+  const canSeeProfitability = canManageCosts(adminRole);
+  // Center Sub-tabs: 'catalog' | 'categories' | 'inventory' | 'pricing' | 'profitability' | 'import_export' | 'reports'
   const [activeCenterTab, setActiveCenterTab] = useState<
-    "catalog" | "categories" | "inventory" | "pricing" | "import_export" | "reports"
-  >(initialTab);
+    "catalog" | "categories" | "inventory" | "pricing" | "profitability" | "import_export" | "reports"
+  >(initialTab === "profitability" && !canSeeProfitability ? "catalog" : initialTab);
 
   // Sync initialTab when changed from outside (e.g. quick dashboard links)
   useEffect(() => {
     if (initialTab) {
-      setActiveCenterTab(initialTab);
+      if (initialTab === "profitability" && !canSeeProfitability) {
+        setActiveCenterTab("catalog");
+      } else {
+        setActiveCenterTab(initialTab);
+      }
     }
-  }, [initialTab]);
+  }, [initialTab, canSeeProfitability]);
 
   // Selected Products for Bulk Actions
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -177,6 +185,25 @@ export function ProductManagementCenter({
             )}
           </button>
 
+          {canSeeProfitability && (
+            <button
+              type="button"
+              onClick={() => setActiveCenterTab("profitability")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition shrink-0",
+                activeCenterTab === "profitability"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <Coins className="size-4" />
+              <span>Profitability & Costs</span>
+              <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                Private
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setActiveCenterTab("import_export")}
@@ -252,6 +279,16 @@ export function ProductManagementCenter({
         />
       )}
 
+      {/* TAB 5: PROFITABILITY & COSTS (SUPER ADMIN & OWNER ONLY) */}
+      {activeCenterTab === "profitability" && canSeeProfitability && (
+        <ProfitabilityTab
+          products={products}
+          categories={categories}
+          onOpenEdit={openEditModal}
+          onRefreshProducts={handleRefreshAll}
+        />
+      )}
+
       {/* TAB 5: IMPORT / EXPORT */}
       {activeCenterTab === "import_export" && (
         <ImportExportTab
@@ -300,6 +337,7 @@ export function ProductManagementCenter({
         }}
         product={editingProduct}
         categories={categories}
+        adminRole={adminRole}
         onSaveSuccess={handleRefreshAll}
       />
     </div>

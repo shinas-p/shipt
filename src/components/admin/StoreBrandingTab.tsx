@@ -23,8 +23,10 @@ import { useBranding } from "@/lib/branding";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+import { canManageBranding, type AdminRole } from "@/lib/permissions";
+
 interface StoreBrandingTabProps {
-  adminRole: "super_admin" | "store_manager" | null;
+  adminRole: AdminRole | null;
   onNavigateStorefront?: () => void;
 }
 
@@ -32,6 +34,7 @@ export function StoreBrandingTab({
   adminRole,
   onNavigateStorefront,
 }: StoreBrandingTabProps) {
+  const canManage = canManageBranding(adminRole);
   const isSuperAdmin = adminRole === "super_admin";
   const { branding, isLoading: brandingLoading, updateBranding, refreshBranding } = useBranding();
 
@@ -168,8 +171,8 @@ export function StoreBrandingTab({
   // Save Settings
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSuperAdmin) {
-      toast.error("Permission Denied: Only Super Admins can update branding.");
+    if (!canManage) {
+      toast.error("Permission Denied: Only Super Admins and Owners can update branding.");
       return;
     }
 
@@ -266,13 +269,15 @@ export function StoreBrandingTab({
       </div>
 
       {/* Role Restriction Notice for Non-Super-Admins */}
-      {!isSuperAdmin && (
+      {!canManage && (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 sm:p-5 text-destructive flex items-start gap-3">
           <ShieldAlert className="size-5 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <h4 className="font-display text-sm font-bold">Store Manager View (Read-Only)</h4>
+            <h4 className="font-display text-sm font-bold">
+              {adminRole === "store_manager" ? "Store Manager View (Read-Only)" : "Staff View (Read-Only)"}
+            </h4>
             <p className="text-xs leading-relaxed text-destructive/90">
-              Only authorized <strong>Super Admins</strong> can update global branding, store names, and logo assets. You can review the current branding below, but modifications are restricted on both the frontend and database levels.
+              Only authorized <strong>Super Admins and Owners</strong> can update global branding, store names, and logo assets. You can review the current branding below, but modifications are restricted on both the frontend and database levels.
             </p>
           </div>
         </div>
@@ -298,7 +303,7 @@ export function StoreBrandingTab({
               <input
                 id="store-name-input"
                 type="text"
-                disabled={!isSuperAdmin}
+                disabled={!canManage}
                 maxLength={50}
                 required
                 value={storeName}
@@ -322,7 +327,7 @@ export function StoreBrandingTab({
               <input
                 id="tagline-input"
                 type="text"
-                disabled={!isSuperAdmin}
+                disabled={!canManage}
                 maxLength={120}
                 required
                 value={tagline}
@@ -421,7 +426,7 @@ export function StoreBrandingTab({
             </div>
 
             {/* Upload & Remove Controls */}
-            {isSuperAdmin && (
+            {canManage && (
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
                 <input
                   type="file"
@@ -500,7 +505,7 @@ export function StoreBrandingTab({
               </div>
             </div>
 
-            {isSuperAdmin && (
+            {canManage && (
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
                 <input
                   type="file"
@@ -552,7 +557,7 @@ export function StoreBrandingTab({
           </div>
 
           {/* Form Action Controls */}
-          {isSuperAdmin && (
+          {canManage && (
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <Button
                 type="button"

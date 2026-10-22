@@ -18,11 +18,12 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { DBCategory, DBProduct } from "./types";
+import { type AdminRole } from "@/lib/permissions";
 
 interface CategoriesTabProps {
   categories: DBCategory[];
   products: DBProduct[];
-  adminRole: "super_admin" | "store_manager" | null;
+  adminRole: AdminRole | null;
   onRefresh: () => Promise<void>;
 }
 

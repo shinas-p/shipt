@@ -106,3 +106,6 @@ export interface ImportRow {
   isUpdate?: boolean | undefined;
   existingId?: string | undefined;
 }
+
+export type { ProductCostRecord, ProfitMetrics, ProductProfitabilityItem } from "@/lib/profitability";
+

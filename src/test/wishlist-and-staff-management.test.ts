@@ -3,15 +3,16 @@ import { products as defaultProducts, getProduct, formatINR } from "@/data/produ
 
 describe("Shipt — Staff Management & Customer Wishlist Suite", { timeout: 25000 }, () => {
   describe("Staff & Roles Management Logic", () => {
-    it("validates permitted staff roles strictly to super_admin and store_manager", () => {
-      const allowedRoles = ["super_admin", "store_manager"];
+    it("validates permitted staff roles strictly to the 4-role hierarchy", () => {
+      const allowedRoles = ["super_admin", "owner", "store_manager", "block_manager"];
       const isRoleValid = (role: string) => allowedRoles.includes(role);
 
       expect(isRoleValid("super_admin")).toBe(true);
+      expect(isRoleValid("owner")).toBe(true);
       expect(isRoleValid("store_manager")).toBe(true);
+      expect(isRoleValid("block_manager")).toBe(true);
       expect(isRoleValid("customer")).toBe(false);
       expect(isRoleValid("admin")).toBe(false);
-      expect(isRoleValid("owner")).toBe(false);
       expect(isRoleValid("")).toBe(false);
     });
 

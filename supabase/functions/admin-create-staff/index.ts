@@ -227,14 +227,20 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (requestedRole !== "store_manager" && requestedRole !== "super_admin") {
+    const validRoles = ["super_admin", "owner", "store_manager", "block_manager"];
+    if (!validRoles.includes(requestedRole)) {
       return new Response(
         JSON.stringify({
-          error: `Invalid role "${requestedRole}". Supported roles: store_manager, super_admin.`,
+          error: `Invalid role "${requestedRole}". Supported roles: super_admin, owner, store_manager, block_manager.`,
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const assignedBlock =
+      requestedRole === "block_manager" && typeof body.assigned_block === "string"
+        ? body.assigned_block.trim()
+        : null;
 
     // 6. Safe User Invitation via Supabase Auth Admin API
     // Populate full_name, name, and first_name in user_metadata so email templates
@@ -244,6 +250,9 @@ Deno.serve(async (req: Request) => {
       assigned_role: requestedRole,
       invited_by: callerUser.id,
     };
+    if (assignedBlock) {
+      userMetadata.assigned_block = assignedBlock;
+    }
 
     if (cleanFullName) {
       userMetadata.full_name = cleanFullName;
@@ -317,6 +326,7 @@ Deno.serve(async (req: Request) => {
         {
           user_id: newUserId,
           role: requestedRole,
+          assigned_block: assignedBlock,
           created_by: callerUser.id,
           created_at: new Date().toISOString(),
         },
@@ -335,6 +345,22 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: `Failed to assign staff permissions: ${roleAssignError.message}` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // 7b. Record audit log
+    try {
+      await adminClient.from("admin_audit_logs").insert({
+        actor_id: callerUser.id,
+        target_user_id: newUserId,
+        action: "invite_and_assign_role",
+        details: {
+          email: cleanEmail,
+          role: requestedRole,
+          assigned_block: assignedBlock,
+        },
+      });
+    } catch (_auditErr) {
+      // Non-blocking
     }
 
     // 8. Ensure profiles table is synchronized with full_name without overwriting unrelated fields

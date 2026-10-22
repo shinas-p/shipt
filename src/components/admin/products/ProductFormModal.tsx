@@ -12,6 +12,9 @@ import {
   Info,
   Eye,
   Star,
+  Lock,
+  Coins,
+  TrendingUp,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { formatINR } from "@/data/products";
 import { BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
+import { calculateProfitMetrics, fetchProductCost, saveProductCost } from "@/lib/profitability";
+import { canManageCosts, type AdminRole } from "@/lib/permissions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { DBProduct, DBCategory } from "./types";
@@ -28,6 +33,7 @@ interface ProductFormModalProps {
   onOpenChange: (open: boolean) => void;
   product: DBProduct | null; // null for creation mode
   categories: DBCategory[];
+  adminRole?: AdminRole | null;
   onSaveSuccess: () => Promise<void>;
 }
 
@@ -36,8 +42,10 @@ export function ProductFormModal({
   onOpenChange,
   product,
   categories,
+  adminRole,
   onSaveSuccess,
 }: ProductFormModalProps) {
+  const canSeeCosts = adminRole === undefined ? true : canManageCosts(adminRole);
   const [activeTab, setActiveTab] = useState<"info" | "pricing" | "images" | "preview">("info");
 
   // Form State
@@ -54,6 +62,12 @@ export function ProductFormModal({
   const [isNew, setIsNew] = useState(false);
   const [isActive, setIsActive] = useState(true);
 
+  // Private Cost State (Admin Only)
+  const [supplierCost, setSupplierCost] = useState("");
+  const [otherCosts, setOtherCosts] = useState("");
+  const [costNotes, setCostNotes] = useState("");
+  const [loadingCost, setLoadingCost] = useState(false);
+
   // Images state (array of uploaded URLs, first one is primary)
   const [images, setImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -66,6 +80,8 @@ interface FormErrors {
   price?: string | undefined;
   originalPrice?: string | undefined;
   stock?: string | undefined;
+  supplierCost?: string | undefined;
+  otherCosts?: string | undefined;
 }
 
   const [saving, setSaving] = useState(false);
@@ -91,6 +107,31 @@ interface FormErrors {
         setIsNew(Boolean(product.is_new));
         setIsActive(Boolean(product.is_active));
         setImages(product.image_url ? [product.image_url] : []);
+
+        // Fetch private supplier cost for existing product (Super Admin & Owner only)
+        if (canSeeCosts) {
+          setLoadingCost(true);
+          fetchProductCost(product.id)
+            .then((costData) => {
+              if (costData) {
+                setSupplierCost(costData.supplier_cost > 0 ? String(costData.supplier_cost) : "");
+                setOtherCosts(costData.other_costs > 0 ? String(costData.other_costs) : "");
+                setCostNotes(costData.notes || "");
+              } else {
+                setSupplierCost("");
+                setOtherCosts("");
+                setCostNotes("");
+              }
+            })
+            .catch(() => {
+              setSupplierCost("");
+              setOtherCosts("");
+              setCostNotes("");
+            })
+            .finally(() => {
+              setLoadingCost(false);
+            });
+        }
       } else {
         setName("");
         setSlug("");
@@ -105,6 +146,10 @@ interface FormErrors {
         setIsNew(true);
         setIsActive(true);
         setImages([]);
+        setSupplierCost("");
+        setOtherCosts("");
+        setCostNotes("");
+        setLoadingCost(false);
       }
     }
   }, [open, product, categories]);
@@ -194,6 +239,9 @@ interface FormErrors {
       ? Math.round((1 - priceNum / origPriceNum) * 100)
       : 0;
 
+  // Real-time Profit, Margin & Markup Calculation
+  const profitMetrics = calculateProfitMetrics(price, supplierCost, otherCosts);
+
   // Validation
   const validate = (): boolean => {
     const errs: FormErrors = {};
@@ -214,6 +262,20 @@ interface FormErrors {
     const stockNum = parseInt(stock, 10);
     if (isNaN(stockNum) || stockNum < 0) {
       errs.stock = "Stock must be a non-negative integer.";
+    }
+
+    if (supplierCost.trim()) {
+      const supplierCostNum = parseFloat(supplierCost);
+      if (isNaN(supplierCostNum) || supplierCostNum < 0) {
+        errs.supplierCost = "Supplier cost must be a non-negative number.";
+      }
+    }
+
+    if (otherCosts.trim()) {
+      const otherCostsNum = parseFloat(otherCosts);
+      if (isNaN(otherCostsNum) || otherCostsNum < 0) {
+        errs.otherCosts = "Other costs must be a non-negative number.";
+      }
     }
 
     setErrors(errs);
@@ -256,6 +318,8 @@ interface FormErrors {
         is_new: isNew,
         is_active: isActive,
       };
+
+      let savedProductId = product?.id || null;
 
       if (product) {
         // Edit existing product
@@ -302,6 +366,8 @@ interface FormErrors {
           return;
         }
 
+        savedProductId = newProd?.id || null;
+
         // Record initial stock creation in inventory movements ledger
         if (payload.stock > 0 && newProd?.id) {
           const { data: { session } } = await supabase.auth.getSession();
@@ -319,6 +385,25 @@ interface FormErrors {
         }
 
         toast.success(`Product "${payload.name}" created successfully!`);
+      }
+
+      // Save private supplier cost & other expenses (authorized Super Admin / Owner only)
+      const targetProductId = savedProductId;
+      if (canSeeCosts && targetProductId) {
+        const cleanSupplier = supplierCost.trim() ? Math.max(0, parseFloat(supplierCost) || 0) : 0;
+        const cleanOther = otherCosts.trim() ? Math.max(0, parseFloat(otherCosts) || 0) : 0;
+
+        if (cleanSupplier > 0 || cleanOther > 0 || costNotes.trim() || product) {
+          const costRes = await saveProductCost(
+            targetProductId,
+            cleanSupplier,
+            cleanOther,
+            costNotes
+          );
+          if (!costRes.success) {
+            toast.warning(`Product saved, but cost update failed: ${costRes.error}`);
+          }
+        }
       }
 
       await onSaveSuccess();
@@ -626,6 +711,152 @@ interface FormErrors {
                   Stock updates are saved to the product ledger and checked atomically during customer checkout.
                 </p>
               </div>
+
+              {/* PRIVATE SUPPLIER COST & PROFIT CARD (SUPER ADMIN & OWNER ONLY) */}
+              {canSeeCosts && (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="grid size-7 place-items-center rounded-lg bg-emerald-500/20 text-emerald-700 dark:text-emerald-400">
+                        <Lock className="size-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                          <span>Supplier Cost & Profit</span>
+                          <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">
+                            Private · Admin Only
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-muted-foreground">
+                          Wholesale procurement costs are strictly confidential and never exposed to customers.
+                        </p>
+                      </div>
+                    </div>
+                    {loadingCost && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">
+                        Supplier Cost (Private) (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={supplierCost}
+                        onChange={(e) => setSupplierCost(e.target.value)}
+                        placeholder="e.g. 40"
+                        className={cn(
+                          "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono font-bold outline-none focus:border-primary",
+                          errors.supplierCost ? "border-destructive ring-1 ring-destructive" : "border-input"
+                        )}
+                      />
+                      {errors.supplierCost && (
+                        <p className="mt-1 text-[11px] text-destructive">{errors.supplierCost}</p>
+                      )}
+                      <p className="mt-1 text-[10px] text-muted-foreground">Unit price paid to supplier / shop.</p>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">
+                        Other Costs (₹) <span className="text-muted-foreground font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={otherCosts}
+                        onChange={(e) => setOtherCosts(e.target.value)}
+                        placeholder="e.g. 5"
+                        className={cn(
+                          "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono outline-none focus:border-primary",
+                          errors.otherCosts ? "border-destructive ring-1 ring-destructive" : "border-input"
+                        )}
+                      />
+                      {errors.otherCosts && (
+                        <p className="mt-1 text-[11px] text-destructive">{errors.otherCosts}</p>
+                      )}
+                      <p className="mt-1 text-[10px] text-muted-foreground">Per-item packaging or transport.</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
+                      Supplier / Sourcing Notes (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={costNotes}
+                      onChange={(e) => setCostNotes(e.target.value)}
+                      placeholder="e.g. Sourced from wholesale distributor; invoice ref #482"
+                      className="h-8 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                    />
+                  </div>
+
+                  {/* Real-time Profit, Margin & Markup Calculation Metrics */}
+                  <div className="rounded-xl border border-border/80 bg-background/80 p-3 space-y-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Total Unit Cost</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {formatINR(profitMetrics.totalCost)}
+                        </p>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "p-2 rounded-lg border",
+                          profitMetrics.isLoss
+                            ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
+                            : "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                        )}
+                      >
+                        <p className="text-[10px] font-medium uppercase">
+                          {profitMetrics.isLoss ? "Estimated Loss" : "Estimated Profit"}
+                        </p>
+                        <p className="mt-0.5 font-mono font-bold text-xs">
+                          {formatINR(Math.abs(profitMetrics.estimatedProfit))}
+                        </p>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "p-2 rounded-lg border",
+                          profitMetrics.isLoss
+                            ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
+                            : "bg-primary/10 border-primary/20 text-primary"
+                        )}
+                      >
+                        <p className="text-[10px] font-medium uppercase">Profit Margin</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs">
+                          {profitMetrics.profitMarginPct.toFixed(1)}%
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Markup</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {profitMetrics.markupPct.toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+
+                    {profitMetrics.isLoss && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                        <AlertCircle className="size-3.5 shrink-0" />
+                        <span>Warning: Selling price is lower than unit cost. This item operates at a loss!</span>
+                      </div>
+                    )}
+
+                    {profitMetrics.totalCost === 0 && (
+                      <p className="text-[10px] text-muted-foreground text-center italic">
+                        Enter supplier cost above to see live profit margin and markup calculations.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

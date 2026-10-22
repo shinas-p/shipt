@@ -23,6 +23,11 @@ import {
   HelpCircle,
   ShieldCheck,
   SlidersHorizontal,
+  MapPin,
+  Shield,
+  Truck,
+  Coins,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +35,14 @@ import { formatINR } from "@/data/products";
 import { BRAND_FALLBACK_IMAGE, resolveOrderItemImage } from "@/lib/catalogApi";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  type AdminRole,
+  canManageCosts,
+  canManageRoles,
+  canManageBranding,
+  getRoleBadge,
+  ADMIN_ROLES_METADATA,
+} from "@/lib/permissions";
 
 export interface AdminOrderItem {
   id: string;
@@ -99,10 +112,11 @@ export interface SmartDashboardProps {
   products: DBProduct[];
   ordersLoading: boolean;
   productsLoading: boolean;
-  adminRole: "super_admin" | "store_manager" | null;
+  adminRole: AdminRole | null;
+  assignedBlock?: string | null;
   userEmail?: string;
   onRefresh: () => void;
-  onNavigateTab: (tab: "orders" | "products" | "banners" | "roles") => void;
+  onNavigateTab: (tab: "orders" | "products" | "banners" | "roles" | "branding") => void;
   onAddNewProduct: () => void;
   onManageInventory: () => void;
   onViewOrder: (order: AdminOrder) => void;
@@ -115,6 +129,7 @@ export function SmartDashboard({
   ordersLoading,
   productsLoading,
   adminRole,
+  assignedBlock,
   userEmail,
   onRefresh,
   onNavigateTab,
@@ -298,6 +313,222 @@ export function SmartDashboard({
 
   const isLoading = ordersLoading || productsLoading;
 
+  const roleMeta = adminRole ? ADMIN_ROLES_METADATA[adminRole] : null;
+  const roleBadge = getRoleBadge(adminRole);
+  const canSeeFinancials = canManageCosts(adminRole);
+
+  // If Block Manager, render the dedicated block coordinator dashboard
+  if (adminRole === "block_manager") {
+    // Unassigned block state
+    if (!assignedBlock) {
+      return (
+        <div className="space-y-6" data-testid="shipt-smart-dashboard">
+          <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-background p-5 sm:p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border", roleBadge.className)}>
+                    <span className="size-2 rounded-full bg-current animate-pulse" />
+                    {roleBadge.label}
+                  </span>
+                  <span className="text-xs text-muted-foreground">• {todayDateStr}</span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+                  Welcome, Block Delivery Manager
+                </h2>
+                <p className="text-xs sm:text-sm text-muted-foreground">
+                  Coordinate local deliveries and update order fulfillment for your assigned campus zone.
+                </p>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="h-9 gap-1.5 text-xs font-semibold"
+              >
+                <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
+                <span>Refresh Status</span>
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-amber-500/30 bg-card p-8 sm:p-12 shadow-soft text-center space-y-4">
+            <div className="mx-auto grid size-16 place-items-center rounded-3xl bg-amber-500/15 text-amber-600">
+              <MapPin className="size-8" />
+            </div>
+            <div>
+              <Badge variant="outline" className="border-amber-500/40 text-amber-700 bg-amber-500/10 mb-2 font-bold text-xs">
+                Block Assignment Pending
+              </Badge>
+              <h3 className="font-display text-2xl font-bold text-foreground">No Delivery Block Assigned</h3>
+              <p className="mt-2 text-xs sm:text-sm text-muted-foreground max-w-md mx-auto leading-relaxed">
+                Your Block Manager account has been verified, but no specific delivery block has been designated yet.
+                Per Shipt Mart data-isolation policies, an unassigned Block Manager cannot view orders from other zones.
+                Please contact a Super Administrator to allocate your delivery block.
+              </p>
+            </div>
+            <div className="pt-2">
+              <Button variant="outline" onClick={onRefresh} className="h-9 text-xs font-semibold gap-1.5">
+                <RefreshCw className="size-3.5" />
+                <span>Re-check Assignment Status</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Assigned Block Manager Dashboard: Defense-in-depth client filter matching assignedBlock
+    const blockOrders = assignedBlock ? orders.filter((o) => o.block === assignedBlock) : [];
+    const blockPending = blockOrders.filter(o => o.status === "placed" || o.status === "confirmed" || o.status === "preparing");
+    const blockOutForDelivery = blockOrders.filter(o => o.status === "out_for_delivery" || o.status === "ready_for_pickup");
+    const blockCompleted = blockOrders.filter(o => o.status === "completed");
+
+    return (
+      <div className="space-y-6" data-testid="shipt-smart-dashboard">
+        <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-background p-5 sm:p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border", roleBadge.className)}>
+                  <span className="size-2 rounded-full bg-current animate-pulse" />
+                  {roleBadge.label}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 text-primary border border-primary/30 px-2.5 py-0.5 text-xs font-bold">
+                  <MapPin className="size-3" />
+                  Zone: {assignedBlock}
+                </span>
+                <span className="text-xs text-muted-foreground">• {todayDateStr}</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+                Welcome back, {assignedBlock} Coordinator
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground">
+                Managing local deliveries, fulfillment status, and handoffs exclusively for {assignedBlock}.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="h-9 gap-1.5 text-xs font-semibold"
+              >
+                <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} />
+                <span>Refresh Orders</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+          <div className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Total Block Orders</span>
+            <div className="mt-2 font-display text-2xl sm:text-3xl font-extrabold text-foreground">{blockOrders.length}</div>
+            <p className="mt-1 text-xs text-muted-foreground">{assignedBlock} all-time orders</p>
+          </div>
+
+          <div className="rounded-2xl border border-amber-500/30 bg-card p-4 sm:p-5 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">Needs Action</span>
+              <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+            </div>
+            <div className="mt-2 font-display text-2xl sm:text-3xl font-extrabold text-foreground">{blockPending.length}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Placed or preparing</p>
+          </div>
+
+          <div className="rounded-2xl border border-purple-500/30 bg-card p-4 sm:p-5 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700 dark:text-purple-400">In Transit / Pickup</span>
+            <div className="mt-2 font-display text-2xl sm:text-3xl font-extrabold text-foreground">{blockOutForDelivery.length}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Out for delivery</p>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-500/30 bg-card p-4 sm:p-5 shadow-xs">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Delivered / Done</span>
+            <div className="mt-2 font-display text-2xl sm:text-3xl font-extrabold text-foreground">{blockCompleted.length}</div>
+            <p className="mt-1 text-xs text-muted-foreground">Fulfilled deliveries</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-border/60 pb-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-foreground">{assignedBlock} Deliveries</h3>
+              <p className="text-xs text-muted-foreground">Active orders assigned to your block for local verification</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => onNavigateTab("orders")} className="h-8 text-xs font-semibold">
+              View All Block Orders ({blockOrders.length})
+            </Button>
+          </div>
+
+          {blockOrders.length === 0 ? (
+            <div className="py-12 text-center rounded-xl border border-dashed border-border bg-muted/10">
+              <Package className="size-10 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm font-bold text-foreground">No orders in {assignedBlock} yet</p>
+              <p className="text-xs text-muted-foreground mt-1">When students place orders to {assignedBlock}, they will appear here in real time.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-border/60 text-muted-foreground">
+                    <th className="pb-3 font-semibold">Order #</th>
+                    <th className="pb-3 font-semibold">Customer</th>
+                    <th className="pb-3 font-semibold">Delivery Info</th>
+                    <th className="pb-3 font-semibold">Status</th>
+                    <th className="pb-3 font-semibold">Items</th>
+                    <th className="pb-3 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {blockOrders.slice(0, 8).map((ord) => {
+                    const badge = getOrderStatusBadge(ord.status);
+                    return (
+                      <tr key={ord.id} className="hover:bg-secondary/30 transition">
+                        <td className="py-3 font-mono font-bold text-foreground">{ord.order_number}</td>
+                        <td className="py-3">
+                          <div className="font-semibold text-foreground">{ord.customer_name}</div>
+                          <div className="text-[10px] text-muted-foreground">{ord.customer_phone}</div>
+                        </td>
+                        <td className="py-3">
+                          <div className="font-semibold">{ord.room ? `Room ${ord.room}` : "Standard"}</div>
+                          <div className="text-[10px] text-muted-foreground">{ord.hostel || assignedBlock}</div>
+                        </td>
+                        <td className="py-3">
+                          <Badge variant="outline" className={cn("text-[10px] font-bold px-2 py-0.5", badge.className)}>
+                            {badge.label}
+                          </Badge>
+                        </td>
+                        <td className="py-3 text-muted-foreground">
+                          {ord.order_items?.length || 0} items
+                        </td>
+                        <td className="py-3 text-right">
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => onViewOrder(ord)}
+                            className="h-7 text-xs font-semibold gap-1 px-3"
+                          >
+                            <Eye className="size-3" />
+                            <span>Update</span>
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8" data-testid="shipt-smart-dashboard">
       {/* Welcome Banner & Live Summary Header */}
@@ -305,20 +536,20 @@ export function SmartDashboard({
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                <span className="size-2 rounded-full bg-primary animate-pulse" />
-                Live Campus Store
+              <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border", roleBadge.className)}>
+                <span className="size-2 rounded-full bg-current animate-pulse" />
+                {roleBadge.label}
               </span>
               <span className="text-xs text-muted-foreground">• {todayDateStr}</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
               Welcome back,{" "}
               <span className="text-primary">
-                {adminRole === "super_admin" ? "Super Admin" : "Store Manager"}
+                {roleMeta?.badgeLabel || "Administrator"}
               </span>
             </h2>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              Here is your live campus store snapshot and quick-action control center.
+              {roleMeta?.description || "Here is your live campus store snapshot and quick-action control center."}
             </p>
           </div>
 
@@ -648,16 +879,16 @@ export function SmartDashboard({
           <button
             type="button"
             onClick={() => {
-              if (adminRole === "super_admin") {
+              if (canManageRoles(adminRole)) {
                 onNavigateTab("roles");
               } else {
                 toast.error("Access restricted: Only Super Administrators can manage staff and roles.");
               }
             }}
-            disabled={adminRole !== "super_admin"}
+            disabled={!canManageRoles(adminRole)}
             className={cn(
               "flex flex-col items-center justify-center gap-2 rounded-xl border p-3.5 text-center transition group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-              adminRole === "super_admin"
+              canManageRoles(adminRole)
                 ? "border-border bg-secondary/30 hover:bg-secondary hover:border-primary/40"
                 : "border-border/40 bg-secondary/10 opacity-60 cursor-not-allowed"
             )}
@@ -670,7 +901,7 @@ export function SmartDashboard({
                 Staff & Roles
               </span>
               <span className="block text-[10px] text-muted-foreground">
-                {adminRole === "super_admin" ? "Manage team" : "Super Admin"}
+                {canManageRoles(adminRole) ? "Manage team" : "Super Admin"}
               </span>
             </div>
           </button>

@@ -41,6 +41,10 @@ import {
   HelpCircle,
   LayoutDashboard,
   Sparkles,
+  Building2,
+  ScrollText,
+  ShieldAlert,
+  CheckCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +60,17 @@ import { SmartDashboard } from "@/components/admin/SmartDashboard";
 import { ProductManagementCenter } from "@/components/admin/products/ProductManagementCenter";
 import { StoreBrandingTab } from "@/components/admin/StoreBrandingTab";
 import type { DBCategory } from "@/components/admin/products/types";
+import {
+  AdminRole,
+  canManageCatalog,
+  canManageBanners,
+  canManageRoles,
+  canManageBranding,
+  canViewAllOrders,
+  canViewAuditLogs,
+  getRoleBadge,
+  ADMIN_ROLES_METADATA,
+} from "@/lib/permissions";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -145,11 +160,29 @@ interface DBProduct {
   display_order?: number;
 }
 
+interface DeliveryBlock {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+}
+
+interface AdminAuditLog {
+  id: string;
+  actor_id: string | null;
+  target_user_id: string | null;
+  action: string;
+  details: Record<string, any> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 interface AdminRoleUser {
   user_id: string;
   email: string;
   full_name?: string;
-  role: string;
+  role: AdminRole;
+  assigned_block?: string | null;
   created_at: string;
 }
 
@@ -158,7 +191,19 @@ export function AdminPage() {
   const { branding } = useBranding();
   const [session, setSession] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [adminRole, setAdminRole] = useState<"super_admin" | "store_manager" | null>(null);
+  const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
+  const [assignedBlock, setAssignedBlock] = useState<string | null>(null);
+  const [availableBlocks, setAvailableBlocks] = useState<DeliveryBlock[]>([
+    { id: "Block A", name: "Block A", is_active: true },
+    { id: "Block B", name: "Block B", is_active: true },
+    { id: "Block C", name: "Block C", is_active: true },
+    { id: "Block D", name: "Block D", is_active: true },
+    { id: "North Wing", name: "North Wing", is_active: true },
+    { id: "South Wing", name: "South Wing", is_active: true },
+    { id: "Main Campus", name: "Main Campus", is_active: true },
+  ]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
+  const [auditLogsLoading, setAuditLogsLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
 
   // Login form state
@@ -240,19 +285,22 @@ export function AdminPage() {
   const [rolesRpcPending, setRolesRpcPending] = useState(false);
   const [sendingPasswordResetEmail, setSendingPasswordResetEmail] = useState<string | null>(null);
   const [newRoleEmail, setNewRoleEmail] = useState("");
-  const [newRoleType, setNewRoleType] = useState<"store_manager" | "super_admin">("store_manager");
+  const [newRoleType, setNewRoleType] = useState<AdminRole>("store_manager");
+  const [newRoleBlock, setNewRoleBlock] = useState<string>("Block A");
   const [assigningRole, setAssigningRole] = useState(false);
 
   // Direct Staff Account Creation (Edge Function)
   const [createStaffName, setCreateStaffName] = useState("");
   const [createStaffEmail, setCreateStaffEmail] = useState("");
-  const [createStaffRole, setCreateStaffRole] = useState<"store_manager" | "super_admin">("store_manager");
+  const [createStaffRole, setCreateStaffRole] = useState<AdminRole>("store_manager");
+  const [createStaffBlock, setCreateStaffBlock] = useState<string>("Block A");
   const [creatingStaff, setCreatingStaff] = useState(false);
   const [createStaffSuccess, setCreateStaffSuccess] = useState<string | null>(null);
   const [createStaffError, setCreateStaffError] = useState<string | null>(null);
   const [existingAccountConflict, setExistingAccountConflict] = useState<{
     email: string;
-    role: "store_manager" | "super_admin";
+    role: AdminRole;
+    assignedBlock?: string | null;
   } | null>(null);
 
   // Check auth and admin permissions
@@ -274,6 +322,7 @@ export function AdminPage() {
       if (!currentSession) {
         setIsAdmin(false);
         setAdminRole(null);
+        setAssignedBlock(null);
         setAuthLoading(false);
         return;
       }
@@ -283,6 +332,7 @@ export function AdminPage() {
       if (!adminStatus) {
         setIsAdmin(false);
         setAdminRole(null);
+        setAssignedBlock(null);
         setAuthLoading(false);
         return;
       }
@@ -290,28 +340,81 @@ export function AdminPage() {
       setIsAdmin(true);
 
       // Check specific role via get_admin_role RPC or direct table query
+      const validRoles: AdminRole[] = ["super_admin", "owner", "store_manager", "block_manager"];
+      let resolvedRole: AdminRole = "store_manager";
+
       try {
         const { data: roleVal } = await supabase.rpc("get_admin_role");
-        if (roleVal === "super_admin" || roleVal === "store_manager") {
-          setAdminRole(roleVal);
+        if (roleVal && validRoles.includes(roleVal as AdminRole)) {
+          resolvedRole = roleVal as AdminRole;
         } else {
           // Fallback check on admin_roles table
           const { data: roleRows } = await supabase
             .from("admin_roles")
-            .select("role")
+            .select("role, assigned_block")
             .eq("user_id", currentSession.user.id);
-          if (roleRows && roleRows.some((r: any) => r.role === "super_admin")) {
-            setAdminRole("super_admin");
-          } else {
-            setAdminRole("store_manager");
+          if (roleRows && roleRows.length > 0) {
+            const priority: AdminRole[] = ["super_admin", "owner", "store_manager", "block_manager"];
+            for (const p of priority) {
+              const match = roleRows.find((r: any) => r.role === p);
+              if (match) {
+                resolvedRole = p;
+                break;
+              }
+            }
           }
         }
       } catch {
-        setAdminRole("store_manager");
+        resolvedRole = "store_manager";
       }
+
+      setAdminRole(resolvedRole);
+
+      // If Block Manager, fetch assigned delivery block
+      if (resolvedRole === "block_manager") {
+        try {
+          const { data: blockVal } = await supabase.rpc("get_assigned_block");
+          if (blockVal) {
+            setAssignedBlock(blockVal);
+          } else {
+            const { data: bRow } = await supabase
+              .from("admin_roles")
+              .select("assigned_block")
+              .eq("user_id", currentSession.user.id)
+              .eq("role", "block_manager")
+              .maybeSingle();
+            setAssignedBlock(bRow?.assigned_block || null);
+          }
+        } catch {
+          setAssignedBlock(null);
+        }
+      } else {
+        setAssignedBlock(null);
+      }
+
+      // Enforce route/tab access for resolved role
+      setActiveTab((prevTab) => {
+        if (resolvedRole === "block_manager" && prevTab !== "dashboard" && prevTab !== "orders") {
+          return "dashboard";
+        }
+        if (!canManageCatalog(resolvedRole) && prevTab === "products") {
+          return "dashboard";
+        }
+        if (!canManageBanners(resolvedRole) && prevTab === "banners") {
+          return "dashboard";
+        }
+        if (!canManageRoles(resolvedRole) && prevTab === "roles") {
+          return "dashboard";
+        }
+        if (!canManageBranding(resolvedRole) && prevTab === "branding") {
+          return "dashboard";
+        }
+        return prevTab;
+      });
     } catch {
       setIsAdmin(false);
       setAdminRole(null);
+      setAssignedBlock(null);
     } finally {
       setAuthLoading(false);
     }
@@ -435,7 +538,7 @@ export function AdminPage() {
     }
   }, []);
 
-  // Load staff roles (Super Admin)
+  // Load staff roles, delivery blocks & audit logs (Super Admin)
   const loadRoles = useCallback(async () => {
     setRolesLoading(true);
     try {
@@ -451,7 +554,7 @@ export function AdminPage() {
         // Fallback: direct table query if RPC not yet applied
         const { data: directData } = await supabase
           .from("admin_roles")
-          .select("user_id, role, created_at");
+          .select("user_id, role, assigned_block, created_at");
         if (directData) {
           const { data: { session: curSess } } = await supabase.auth.getSession();
           const mapped = directData.map((d: any) => {
@@ -460,12 +563,45 @@ export function AdminPage() {
               user_id: d.user_id,
               email: isMe && curSess?.user?.email ? curSess.user.email : d.user_id,
               ...(isMe ? { full_name: "Current Super Admin" } : {}),
-              role: d.role,
+              role: d.role as AdminRole,
+              assigned_block: d.assigned_block,
               created_at: d.created_at,
             };
           });
           setRolesList(mapped);
         }
+      }
+
+      // Load active delivery blocks for block assignment
+      const { data: blocksData } = await supabase
+        .from("delivery_blocks")
+        .select("id, name, description, is_active")
+        .eq("is_active", true)
+        .order("name", { ascending: true });
+      if (blocksData && blocksData.length > 0) {
+        setAvailableBlocks(blocksData as DeliveryBlock[]);
+      }
+
+      // Load audit logs if Super Admin
+      setAuditLogsLoading(true);
+      try {
+        const { data: logsData, error: logsError } = await supabase.rpc("admin_get_audit_logs", { p_limit: 50 });
+        if (!logsError && logsData) {
+          setAuditLogs(logsData as AdminAuditLog[]);
+        } else {
+          const { data: directLogs } = await supabase
+            .from("admin_audit_logs")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(50);
+          if (directLogs) {
+            setAuditLogs(directLogs as AdminAuditLog[]);
+          }
+        }
+      } catch {
+        // Non-blocking for audit logs
+      } finally {
+        setAuditLogsLoading(false);
       }
     } catch {
       // Non-blocking
@@ -477,10 +613,14 @@ export function AdminPage() {
   useEffect(() => {
     if (isAdmin) {
       loadOrders();
-      loadProducts();
-      loadCategories();
-      if (adminRole === "super_admin") {
+      if (canManageCatalog(adminRole)) {
+        loadProducts();
+        loadCategories();
+      }
+      if (canManageBanners(adminRole)) {
         loadBanners();
+      }
+      if (canManageRoles(adminRole)) {
         loadRoles();
       }
     }
@@ -564,7 +704,7 @@ export function AdminPage() {
       const defaultNotes =
         notes?.trim() ||
         `Status changed to ${newStatus.replace(/_/g, " ")} by ${
-          adminRole === "super_admin" ? "Super Admin" : "Store Manager"
+          adminRole ? getRoleBadge(adminRole).label : "Staff"
         }`;
 
       const { error } = await supabase.rpc("admin_update_order_status", {
@@ -953,6 +1093,7 @@ export function AdminPage() {
           name: cleanName,
           full_name: cleanName,
           role: createStaffRole,
+          assigned_block: createStaffRole === "block_manager" ? createStaffBlock : null,
           redirectTo: redirectUrl,
         },
       });
@@ -984,7 +1125,11 @@ export function AdminPage() {
           errorMsg.toLowerCase().includes("already registered") ||
           errorMsg.toLowerCase().includes("already exists")
         ) {
-          setExistingAccountConflict({ email: cleanEmail, role: createStaffRole });
+          setExistingAccountConflict({
+            email: cleanEmail,
+            role: createStaffRole,
+            assignedBlock: createStaffRole === "block_manager" ? createStaffBlock : null,
+          });
           setCreateStaffError(
             `Account already exists: "${cleanEmail}" is already registered. You can directly assign them the ${createStaffRole.replace("_", " ")} role below.`
           );
@@ -1014,7 +1159,11 @@ export function AdminPage() {
           toast.error(`Staff account creation failed: ${errorMsg}`);
         }
       } else if (data?.alreadyExists) {
-        setExistingAccountConflict({ email: cleanEmail, role: createStaffRole });
+        setExistingAccountConflict({
+          email: cleanEmail,
+          role: createStaffRole,
+          assignedBlock: createStaffRole === "block_manager" ? createStaffBlock : null,
+        });
         setCreateStaffError(data.error || "User already exists.");
         toast.info(data.message || "User already registered. Use role assignment.");
       } else {
@@ -1022,7 +1171,9 @@ export function AdminPage() {
           duration: 6000,
         });
         setCreateStaffSuccess(
-          `Successfully created staff account for ${cleanEmail} (${createStaffRole.replace("_", " ")}). An official invitation email has been sent!`
+          `Successfully created staff account for ${cleanEmail} (${createStaffRole.replace("_", " ")}${
+            createStaffRole === "block_manager" ? ` - ${createStaffBlock}` : ""
+          }). An official invitation email has been sent!`
         );
         setCreateStaffEmail("");
         setCreateStaffName("");
@@ -1036,12 +1187,17 @@ export function AdminPage() {
     }
   };
 
-  const handleAssignExistingAfterConflict = async (targetEmail: string, targetRole: "store_manager" | "super_admin") => {
+  const handleAssignExistingAfterConflict = async (
+    targetEmail: string,
+    targetRole: AdminRole,
+    targetBlock?: string
+  ) => {
     setAssigningRole(true);
     try {
       const { error } = await supabase.rpc("admin_assign_role", {
         p_email: targetEmail,
         p_role: targetRole,
+        p_assigned_block: targetRole === "block_manager" ? (targetBlock || createStaffBlock || "Block A") : null,
       });
 
       if (error) {
@@ -1068,19 +1224,27 @@ export function AdminPage() {
       return;
     }
 
+    if (newRoleType === "block_manager" && !newRoleBlock.trim()) {
+      toast.error("Please select an assigned delivery block for the Block Manager.");
+      return;
+    }
+
     setAssigningRole(true);
     try {
       const { error } = await supabase.rpc("admin_assign_role", {
         p_email: cleanEmail,
         p_role: newRoleType,
+        p_assigned_block: newRoleType === "block_manager" ? newRoleBlock : null,
       });
 
       if (error) {
         if (error.code === "PGRST202" || error.message?.includes("schema cache")) {
           setRolesRpcPending(true);
-          toast.error("Database Migration Pending: The admin_assign_role function is not in the schema cache. Please execute migration 20261014010000_role_based_administration.sql in your Supabase SQL Editor.", {
+          toast.error("Database Migration Pending: The admin_assign_role function is not in the schema cache. Please execute the latest role hierarchy migration in your Supabase SQL Editor.", {
             duration: 8000,
           });
+        } else if (error.message?.includes("last remaining Super Administrator")) {
+          toast.error("Safety Lockout Prevention: Cannot demote or alter the role of the last remaining Super Administrator.");
         } else if (error.message?.includes("No user found")) {
           toast.error(`Staff user not found: ${error.message}`, {
             description: "The staff member must first register an account at /account or be invited via the Supabase Dashboard.",
@@ -1092,7 +1256,11 @@ export function AdminPage() {
           toast.error(`Role assignment failed: ${error.message}`);
         }
       } else {
-        toast.success(`Assigned ${newRoleType.replace("_", " ")} to ${cleanEmail}`);
+        toast.success(
+          `Assigned ${newRoleType.replace("_", " ")}${
+            newRoleType === "block_manager" ? ` (${newRoleBlock})` : ""
+          } to ${cleanEmail}`
+        );
         setNewRoleEmail("");
         loadRoles();
       }
@@ -1149,7 +1317,11 @@ export function AdminPage() {
       });
 
       if (error) {
-        toast.error(`Failed to revoke role: ${error.message}`);
+        if (error.message?.includes("last remaining Super Administrator")) {
+          toast.error("Safety Lockout Prevention: Cannot revoke or delete the last remaining Super Administrator.");
+        } else {
+          toast.error(`Failed to revoke role: ${error.message}`);
+        }
       } else {
         toast.success("Role revoked successfully.");
         loadRoles();
@@ -1303,13 +1475,25 @@ export function AdminPage() {
                 variant="outline"
                 className={cn(
                   "text-xs font-bold uppercase",
-                  adminRole === "super_admin"
-                    ? "border-purple-500/40 text-purple-700 bg-purple-500/10"
-                    : "border-blue-500/40 text-blue-700 bg-blue-500/10"
+                  getRoleBadge(adminRole).className
                 )}
               >
-                {adminRole === "super_admin" ? "Super Admin" : "Store Manager"}
+                {getRoleBadge(adminRole).label}
               </Badge>
+              {adminRole === "block_manager" && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs font-semibold",
+                    assignedBlock
+                      ? "border-purple-500/40 text-purple-700 bg-purple-500/10 dark:text-purple-300"
+                      : "border-amber-500/40 text-amber-700 bg-amber-500/10 dark:text-amber-300"
+                  )}
+                >
+                  <Building2 className="size-3 mr-1 inline-block" />
+                  {assignedBlock ? `Block: ${assignedBlock}` : "No Block Assigned"}
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">{session?.user?.email}</p>
           </div>
@@ -1353,68 +1537,78 @@ export function AdminPage() {
           )}
         >
           <Package className="size-4" />
-          <span>Orders ({orders.length})</span>
+          <span>
+            {adminRole === "block_manager"
+              ? `Block Orders (${orders.length})`
+              : `Orders (${orders.length})`}
+          </span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("products")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-            activeTab === "products"
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-          )}
-        >
-          <Layers className="size-4" />
-          <span>Products & Stock ({dbProducts.length})</span>
-        </button>
+        {canManageCatalog(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("products")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "products"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <Layers className="size-4" />
+            <span>Products & Stock ({dbProducts.length})</span>
+          </button>
+        )}
 
-        {/* Super Admin Tabs */}
-        {adminRole === "super_admin" && (
-          <>
-            <button
-              type="button"
-              onClick={() => setActiveTab("banners")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-                activeTab === "banners"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <ImageIcon className="size-4" />
-              <span>Promotional Banners ({banners.length})</span>
-            </button>
+        {/* Super Admin & Owner: Promotional Banners */}
+        {canManageBanners(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("banners")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "banners"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <ImageIcon className="size-4" />
+            <span>Promotional Banners ({banners.length})</span>
+          </button>
+        )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab("roles")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-                activeTab === "roles"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <Users className="size-4" />
-              <span>Staff & Roles</span>
-            </button>
+        {/* Super Admin: Staff Roles & Security */}
+        {canManageRoles(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("roles")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "roles"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <Users className="size-4" />
+            <span>Staff & Security</span>
+          </button>
+        )}
 
-            <button
-              type="button"
-              onClick={() => setActiveTab("branding")}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-                activeTab === "branding"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <Sparkles className="size-4" />
-              <span>Store Branding</span>
-            </button>
-          </>
+        {/* Super Admin & Owner: Store Branding */}
+        {canManageBranding(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("branding")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "branding"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <Sparkles className="size-4" />
+            <span>Store Branding</span>
+          </button>
         )}
       </div>
 
@@ -1427,17 +1621,28 @@ export function AdminPage() {
             ordersLoading={ordersLoading}
             productsLoading={productsLoading}
             adminRole={adminRole}
+            assignedBlock={assignedBlock}
             userEmail={session?.user?.email}
             onRefresh={() => {
               loadOrders();
-              loadProducts();
+              if (canManageCatalog(adminRole)) {
+                loadProducts();
+              }
             }}
-            onNavigateTab={(tab) => setActiveTab(tab)}
+            onNavigateTab={(tab) => {
+              if (tab === "products" && !canManageCatalog(adminRole)) return;
+              if (tab === "banners" && !canManageBanners(adminRole)) return;
+              if (tab === "roles" && !canManageRoles(adminRole)) return;
+              if (tab === "branding" && !canManageBranding(adminRole)) return;
+              setActiveTab(tab);
+            }}
             onAddNewProduct={() => {
+              if (!canManageCatalog(adminRole)) return;
               setActiveTab("products");
               setProductCenterSubTab("catalog");
             }}
             onManageInventory={() => {
+              if (!canManageCatalog(adminRole)) return;
               setActiveTab("products");
               setProductCenterSubTab("inventory");
             }}
@@ -1446,6 +1651,7 @@ export function AdminPage() {
               setTargetStatus(order.status);
             }}
             onEditProduct={(product) => {
+              if (!canManageCatalog(adminRole)) return;
               setActiveTab("products");
               openEditProduct(product);
             }}
@@ -1863,7 +2069,7 @@ export function AdminPage() {
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold text-foreground">Update Order Status</h4>
                       <Badge variant="outline" className="text-[10px] uppercase font-bold text-primary border-primary/30">
-                        Role: {adminRole === "super_admin" ? "Super Admin" : "Store Manager"}
+                        Role: {adminRole ? getRoleBadge(adminRole).label : "Staff"}
                       </Badge>
                     </div>
 
@@ -1963,7 +2169,7 @@ export function AdminPage() {
       )}
 
       {/* TAB 2: COMPLETE PRODUCT MANAGEMENT CENTER */}
-      {activeTab === "products" && (
+      {activeTab === "products" && canManageCatalog(adminRole) && (
         <div className="mt-6">
           <ProductManagementCenter
             products={dbProducts}
@@ -1978,8 +2184,8 @@ export function AdminPage() {
         </div>
       )}
 
-      {/* TAB 3: PROMOTIONAL BANNERS MANAGEMENT (SUPER ADMIN ONLY) */}
-      {activeTab === "banners" && adminRole === "super_admin" && (
+      {/* TAB 3: PROMOTIONAL BANNERS MANAGEMENT (SUPER ADMIN & OWNER) */}
+      {activeTab === "banners" && canManageBanners(adminRole) && (
         <div className="mt-6 space-y-8">
           {/* Create or Edit Banner Card */}
           <div id="banner-form-card" className="rounded-3xl border border-border bg-card p-5 sm:p-7 shadow-xs">
@@ -2361,13 +2567,38 @@ export function AdminPage() {
                   </label>
                   <select
                     value={createStaffRole}
-                    onChange={(e) => setCreateStaffRole(e.target.value as any)}
+                    onChange={(e) => setCreateStaffRole(e.target.value as AdminRole)}
                     className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                   >
-                    <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
-                    <option value="super_admin">Super Administrator (Full System & Role Access)</option>
+                    <option value="store_manager">Store Manager (Catalog, Stock, Orders)</option>
+                    <option value="owner">Store Owner (Business, Analytics, Private Costs)</option>
+                    <option value="super_admin">Super Administrator (Full System & Security Access)</option>
+                    <option value="block_manager">Block Manager (Assigned Delivery Block Only)</option>
                   </select>
                 </div>
+
+                {createStaffRole === "block_manager" && (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Assigned Delivery Block *
+                    </label>
+                    <select
+                      value={createStaffBlock}
+                      onChange={(e) => setCreateStaffBlock(e.target.value)}
+                      required
+                      className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                    >
+                      {availableBlocks.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.id})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Block Managers are strictly restricted to orders within this delivery block.
+                    </p>
+                  </div>
+                )}
 
                 <Button
                   type="submit"
@@ -2401,7 +2632,7 @@ export function AdminPage() {
                   </h3>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Grant Store Manager or Super Administrator permissions to a user who already has a registered Shipt account.
+                  Grant an administrative role to a user who already has a registered Shipt account.
                 </p>
 
                 <form onSubmit={handleAssignRole} className="mt-4 space-y-3.5">
@@ -2421,13 +2652,38 @@ export function AdminPage() {
                     <label className="mb-1 block text-xs font-semibold text-foreground">Role Level *</label>
                     <select
                       value={newRoleType}
-                      onChange={(e) => setNewRoleType(e.target.value as any)}
+                      onChange={(e) => setNewRoleType(e.target.value as AdminRole)}
                       className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                     >
-                      <option value="store_manager">Store Manager (Products, Stock, Orders)</option>
-                      <option value="super_admin">Super Administrator (Full System & Role Access)</option>
+                      <option value="store_manager">Store Manager (Catalog, Stock, Orders)</option>
+                      <option value="owner">Store Owner (Business, Analytics, Private Costs)</option>
+                      <option value="super_admin">Super Administrator (Full System & Security Access)</option>
+                      <option value="block_manager">Block Manager (Assigned Delivery Block Only)</option>
                     </select>
                   </div>
+
+                  {newRoleType === "block_manager" && (
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">
+                        Assigned Delivery Block *
+                      </label>
+                      <select
+                        value={newRoleBlock}
+                        onChange={(e) => setNewRoleBlock(e.target.value)}
+                        required
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                      >
+                        {availableBlocks.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name} ({b.id})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Restricts this administrator's view and operations to this delivery block.
+                      </p>
+                    </div>
+                  )}
 
                   <Button type="submit" variant="outline" disabled={assigningRole} className="h-10 px-5 font-bold text-xs">
                     {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
@@ -2456,7 +2712,7 @@ export function AdminPage() {
                   <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
                     <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">2</span>
                     <p className="text-muted-foreground">
-                      <strong className="text-foreground">Private Password Setup:</strong> Clicking the link opens <code className="text-primary font-mono font-semibold">/account</code>, where they choose their secure password.
+                      <strong className="text-foreground">Private Password Setup:</strong> Clicking the link opens <code className="text-primary font-mono font-semibold">/accept-invitation</code>, where they choose their secure password.
                     </p>
                   </div>
 
@@ -2491,6 +2747,7 @@ export function AdminPage() {
                   <tr>
                     <th className="p-3 font-semibold">Staff Member</th>
                     <th className="p-3 font-semibold">Assigned Role</th>
+                    <th className="p-3 font-semibold">Scope / Coverage</th>
                     <th className="p-3 font-semibold">Date Added</th>
                     <th className="p-3 font-semibold text-right">Actions</th>
                   </tr>
@@ -2518,13 +2775,21 @@ export function AdminPage() {
                           variant="outline"
                           className={cn(
                             "capitalize font-bold text-[11px]",
-                            r.role === "super_admin"
-                              ? "bg-purple-500/10 text-purple-700 border-purple-500/30"
-                              : "bg-blue-500/10 text-blue-700 border-blue-500/30"
+                            getRoleBadge(r.role).className
                           )}
                         >
-                          {r.role.replace("_", " ")}
+                          {getRoleBadge(r.role).label}
                         </Badge>
+                      </td>
+                      <td className="p-3">
+                        {r.role === "block_manager" ? (
+                          <Badge variant="outline" className="border-purple-500/30 text-purple-700 bg-purple-500/10 text-[11px] font-semibold dark:text-purple-300">
+                            <Building2 className="size-3 mr-1 inline-block" />
+                            {r.assigned_block || "Unassigned"}
+                          </Badge>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground font-medium">All Blocks / Store-wide</span>
+                        )}
                       </td>
                       <td className="p-3 text-muted-foreground">
                         {r.created_at ? new Date(r.created_at).toLocaleDateString() : "Initial"}
@@ -2570,11 +2835,72 @@ export function AdminPage() {
               </table>
             </div>
           </div>
+
+          {/* Protected Security Audit Trail */}
+          <div className="space-y-3 pt-4 border-t border-border/60">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ScrollText className="size-4 text-primary" />
+                <h3 className="font-display text-base font-bold text-foreground">Security Audit Trail</h3>
+                <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary">
+                  Protected Log
+                </Badge>
+              </div>
+              <Button variant="outline" size="sm" onClick={loadRoles} className="h-8 gap-1 text-xs">
+                <RefreshCw className={cn("size-3", auditLogsLoading && "animate-spin")} />
+                <span>Refresh Logs</span>
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Immutable log of administrative grants, role changes, revocations, and block assignments.
+            </p>
+
+            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
+                  <tr>
+                    <th className="p-3 font-semibold">Timestamp</th>
+                    <th className="p-3 font-semibold">Action</th>
+                    <th className="p-3 font-semibold">Target / Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {auditLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} className="p-6 text-center text-xs text-muted-foreground">
+                        {auditLogsLoading ? "Loading audit logs..." : "No administrative audit log entries recorded yet."}
+                      </td>
+                    </tr>
+                  ) : (
+                    auditLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-secondary/20">
+                        <td className="p-3 whitespace-nowrap text-muted-foreground font-mono text-[11px]">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                        <td className="p-3 whitespace-nowrap">
+                          <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                            {log.action}
+                          </Badge>
+                        </td>
+                        <td className="p-3 text-foreground font-mono text-[11px]">
+                          {log.details ? (
+                            <span className="break-all">{JSON.stringify(log.details)}</span>
+                          ) : (
+                            <span className="text-muted-foreground">Target: {log.target_user_id || "System"}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* TAB 5: STORE BRANDING SETTINGS (Super Admin Only) */}
-      {activeTab === "branding" && (
+      {/* TAB 5: STORE BRANDING SETTINGS (Super Admin & Owner) */}
+      {activeTab === "branding" && canManageBranding(adminRole) && (
         <div className="mt-6">
           <StoreBrandingTab
             adminRole={adminRole}

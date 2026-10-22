@@ -22,7 +22,7 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
     id: string;
     email: string;
     fullName?: string;
-    role?: "super_admin" | "store_manager";
+    role?: "super_admin" | "owner" | "store_manager" | "block_manager";
   }
 
   class MockAuthAndDbService {
@@ -101,10 +101,11 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
         return { status: 400, body: { error: "A valid email address is required." } };
       }
 
-      if (requestedRole !== "store_manager" && requestedRole !== "super_admin") {
+      const validRoles = ["super_admin", "owner", "store_manager", "block_manager"];
+      if (!validRoles.includes(requestedRole)) {
         return {
           status: 400,
-          body: { error: `Invalid role "${requestedRole}". Supported roles: store_manager, super_admin.` },
+          body: { error: `Invalid role "${requestedRole}". Supported roles: super_admin, owner, store_manager, block_manager.` },
         };
       }
 
