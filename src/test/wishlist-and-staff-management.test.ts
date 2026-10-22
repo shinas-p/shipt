@@ -19,8 +19,8 @@ describe("Shipt — Staff Management & Customer Wishlist Suite", { timeout: 2500
     it("normalizes staff email addresses consistently", () => {
       const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-      expect(normalizeEmail("  Manager@Shipt.Campus  ")).toBe("manager@shipt.campus");
-      expect(normalizeEmail("STUDENT@DHUniversity.EDU")).toBe("student@dhuniversity.edu");
+      expect(normalizeEmail("  Manager@ShiptMart.COM  ")).toBe("manager@shiptmart.com");
+      expect(normalizeEmail("STUDENT@ShiptMart.COM")).toBe("student@shiptmart.com");
     });
 
     it("validates that empty or malformed staff emails are rejected before RPC invocation", () => {
@@ -35,7 +35,7 @@ describe("Shipt — Staff Management & Customer Wishlist Suite", { timeout: 2500
 
       expect(validateStaffEmail("").valid).toBe(false);
       expect(validateStaffEmail("invalid-email").valid).toBe(false);
-      expect(validateStaffEmail("staff@campus.edu").valid).toBe(true);
+      expect(validateStaffEmail("staff@shiptmart.com").valid).toBe(true);
     });
 
     it("detects schema cache missing function errors and sets diagnostic notice", () => {
@@ -130,7 +130,7 @@ describe("Shipt — Staff Management & Customer Wishlist Suite", { timeout: 2500
     });
 
     it("simulates wishlist persistence to local storage format", () => {
-      const STORAGE_KEY = "campusmart.demo.wishlist";
+      const STORAGE_KEY = "shiptmart.wishlist";
       const initialWishlist = ["notebook-a5", "biscuits-cream"];
 
       // Simulate save

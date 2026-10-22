@@ -268,7 +268,7 @@ describe("Shipt Smart Dashboard Enhancement", { timeout: 15000 }, () => {
 
     expect(screen.getByText("Healthy Inventory")).toBeInTheDocument();
     expect(
-      screen.getByText("All campus catalog products currently have 6 or more units in stock.")
+      screen.getByText("All catalog products currently have 6 or more units in stock.")
     ).toBeInTheDocument();
   });
 

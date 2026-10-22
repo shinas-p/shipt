@@ -1,5 +1,4 @@
-// Demo catalogue — sample prices only, not verified market prices.
-// Replace with a database query when the backend is connected.
+// Default catalogue items — bundled product metadata and assets.
 import type { Category, Product } from "@/lib/types";
 import notebook from "@/assets/p-notebook.jpg";
 import pen from "@/assets/p-pen.jpg";

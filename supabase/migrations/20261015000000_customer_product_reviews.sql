@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.product_reviews (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   rating smallint NOT NULL CHECK (rating >= 1 AND rating <= 5),
   review_text text NOT NULL CHECK (char_length(review_text) <= 1000),
-  customer_name text NOT NULL DEFAULT 'Campus Student',
+  customer_name text NOT NULL DEFAULT 'Customer',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT uq_customer_product_review UNIQUE (product_id, user_id)

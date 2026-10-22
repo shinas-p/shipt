@@ -160,7 +160,7 @@ export function BannerCarousel() {
   return (
     <section
       className="container-page py-2 sm:py-3.5"
-      aria-label="Promotions and campus announcements"
+      aria-label="Promotions and announcements"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
       onTouchStart={() => setIsPaused(true)}
@@ -209,7 +209,7 @@ export function BannerCarousel() {
               <div className="relative z-10 flex h-full max-w-lg flex-col justify-center px-5 py-3 text-white sm:max-w-xl sm:px-8 sm:py-4 lg:px-12">
                 <div className="inline-flex items-center gap-1.5 self-start rounded-full bg-lime/20 px-2.5 py-0.5 text-[10px] font-bold text-lime backdrop-blur-xs sm:text-xs">
                   <Sparkles className="size-3 text-lime" />
-                  <span>Campus Special</span>
+                  <span>Special Offer</span>
                 </div>
 
                 <h3 className="mt-1.5 font-display text-base font-extrabold tracking-tight text-white line-clamp-1 sm:mt-2 sm:text-xl md:text-2xl lg:text-3xl">

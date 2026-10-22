@@ -1,5 +1,5 @@
 -- ==============================================================================
--- Quick Mart — Seed Data for Demo Catalogue
+-- Shipt Mart — Seed Data
 -- Version: 20261013000000
 -- Target: Supabase / PostgreSQL
 --

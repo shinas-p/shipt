@@ -43,13 +43,13 @@ export function resolveOrderItemImage(item: {
     return item.products.image_url;
   }
 
-  // 3. Bundled campus catalog image keyed by product_id
+  // 3. Bundled catalog image keyed by product_id
   if (item.product_id) {
     const localImg = localImageMap[item.product_id];
     if (localImg) return localImg;
   }
 
-  // 4. Bundled campus catalog image matched by product_name
+  // 4. Bundled catalog image matched by product_name
   if (item.product_name) {
     const match = defaultProducts.find(
       (p) => p.name.toLowerCase().trim() === item.product_name?.toLowerCase().trim()
@@ -121,7 +121,7 @@ export async function loadProducts(): Promise<Product[]> {
         imageSrc = p.image_url;
       }
 
-      // 2. Fall back to bundled campus assets for initial catalogue items
+      // 2. Fall back to bundled catalog assets for initial catalogue items
       if (!imageSrc) {
         imageSrc = (p.slug && localImageMap[p.slug]) || (p.id && localImageMap[p.id]) || "";
       }
@@ -236,7 +236,7 @@ export async function trackGuestOrder(
       data: {
         order_number: orderNumber.trim(),
         status: "placed",
-        customer_name: "Demo Customer",
+        customer_name: "Customer",
         delivery_method: "hostel_delivery",
         hostel: "Ganga Hostel",
         block: "A",

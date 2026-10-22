@@ -242,7 +242,7 @@ function ProductDetailPage() {
               <div className="absolute left-4 top-4 flex flex-col items-start gap-1.5">
                 {product.bestseller && (
                   <span className="rounded-full bg-forest px-3 py-1 text-xs font-bold text-forest-foreground shadow-xs">
-                    Campus Bestseller
+                    Bestseller
                   </span>
                 )}
                 {discountPercent > 0 && (
@@ -286,13 +286,13 @@ function ProductDetailPage() {
             <div className="mt-4 grid grid-cols-3 gap-2 rounded-2xl border border-border/80 bg-secondary/30 p-3 text-center text-xs">
               <div className="flex flex-col items-center gap-1">
                 <Truck className="size-4 text-primary" />
-                <span className="font-semibold text-foreground">Room Delivery</span>
+                <span className="font-semibold text-foreground">Fast Delivery</span>
                 <span className="text-[10px] text-muted-foreground">Within 20 mins</span>
               </div>
               <div className="flex flex-col items-center gap-1 border-x border-border/60 px-1">
                 <ShieldCheck className="size-4 text-primary" />
                 <span className="font-semibold text-foreground">100% Genuine</span>
-                <span className="text-[10px] text-muted-foreground">Campus verified</span>
+                <span className="text-[10px] text-muted-foreground">Verified quality</span>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <RotateCcw className="size-4 text-primary" />
@@ -368,7 +368,7 @@ function ProductDetailPage() {
             ) : isLowStock ? (
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
                 <Clock className="size-4" />
-                <span>Hurry! Only {product.stock} left in campus store</span>
+                <span>Hurry! Only {product.stock} left in stock</span>
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">

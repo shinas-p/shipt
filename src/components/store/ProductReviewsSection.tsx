@@ -136,7 +136,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
         }
       } else {
         // Create new review
-        const safeDisplayName = profile?.full_name?.trim() || "Campus Student";
+        const safeDisplayName = profile?.full_name?.trim() || "Customer";
         const res = await submitProductReview({
           productId,
           rating: ratingInput,
@@ -272,7 +272,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
               {editingReviewId ? "Edit Your Review" : `Review ${productName}`}
             </h3>
             <span className="text-xs text-muted-foreground">
-              Posting as: <strong>{profile?.full_name || "Campus Student"}</strong>
+              Posting as: <strong>{profile?.full_name || "Customer"}</strong>
             </span>
           </div>
 
@@ -337,7 +337,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
                 maxLength={1000}
                 value={reviewTextInput}
                 onChange={(e) => setReviewTextInput(e.target.value)}
-                placeholder="What did you like or dislike? Was it delivered fast to your hostel room?"
+                placeholder="What did you like or dislike? Was it delivered fast to your door?"
                 className="w-full rounded-2xl border border-input bg-background p-3.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
               />
             </div>
@@ -379,7 +379,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
       {/* Sort & Filter Controls */}
       <div className="mt-8 flex items-center justify-between border-b border-border pb-3">
         <h3 className="font-display text-base font-bold text-foreground">
-          Student Feedback ({reviews.length})
+          Customer Feedback ({reviews.length})
         </h3>
         <div className="flex items-center gap-2 text-xs">
           <span className="text-muted-foreground hidden sm:inline">Sort by:</span>
@@ -408,7 +408,7 @@ export function ProductReviewsSection({ productId, productName, onReviewsChange 
             </div>
             <h4 className="mt-3 font-display text-base font-bold text-foreground">No reviews yet</h4>
             <p className="mt-1 text-xs text-muted-foreground">
-              Be the first campus student to share your experience with this item!
+              Be the first customer to share your experience with this item!
             </p>
             {user && (
               <Button

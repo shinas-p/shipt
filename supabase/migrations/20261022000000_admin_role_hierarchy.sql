@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS public.delivery_blocks (
 -- Seed standard delivery blocks safely and idempotently
 INSERT INTO public.delivery_blocks (id, name, description)
 VALUES
-  ('Block A', 'Block A', 'Campus Block A Residential Area'),
-  ('Block B', 'Block B', 'Campus Block B Residential Area'),
-  ('Block C', 'Block C', 'Campus Block C Residential Area'),
-  ('Block D', 'Block D', 'Campus Block D Residential Area'),
-  ('North Wing', 'North Wing', 'North Campus Delivery Zone'),
-  ('South Wing', 'South Wing', 'South Campus Delivery Zone'),
-  ('Main Campus', 'Main Campus', 'Central Campus Delivery Zone')
+  ('Block A', 'Block A', 'Residential Area Block A'),
+  ('Block B', 'Block B', 'Residential Area Block B'),
+  ('Block C', 'Block C', 'Residential Area Block C'),
+  ('Block D', 'Block D', 'Residential Area Block D'),
+  ('North Wing', 'North Wing', 'North Wing Delivery Zone'),
+  ('South Wing', 'South Wing', 'South Wing Delivery Zone'),
+  ('Main Campus', 'Main Campus', 'Main Hub Delivery Zone')
 ON CONFLICT (id) DO NOTHING;
 
 ALTER TABLE public.delivery_blocks ENABLE ROW LEVEL SECURITY;
@@ -266,6 +266,20 @@ CREATE POLICY "admin_audit_logs_select_super_admin" ON public.admin_audit_logs
   USING (public.is_super_admin());
 
 -- 6. Supplier Costs Protection (Super Admin & Owner Only)
+CREATE TABLE IF NOT EXISTS public.product_costs (
+  product_id uuid PRIMARY KEY REFERENCES public.products(id) ON DELETE CASCADE,
+  supplier_cost numeric(10, 2) NOT NULL DEFAULT 0.00 CHECK (supplier_cost >= 0),
+  other_costs numeric(10, 2) NOT NULL DEFAULT 0.00 CHECK (other_costs >= 0),
+  notes text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_costs_product_id ON public.product_costs(product_id);
+ALTER TABLE public.product_costs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.product_costs FROM PUBLIC, anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.product_costs TO authenticated;
+
 DROP POLICY IF EXISTS "product_costs_admin_all" ON public.product_costs;
 CREATE POLICY "product_costs_admin_all" ON public.product_costs
   FOR ALL TO authenticated
@@ -513,6 +527,7 @@ CREATE POLICY "categories_admin_all" ON public.categories
   WITH CHECK (public.can_manage_catalog());
 
 -- 12. RPC: Super Admin - List all staff roles with block assignments
+DROP FUNCTION IF EXISTS public.admin_list_roles();
 CREATE OR REPLACE FUNCTION public.admin_list_roles()
 RETURNS TABLE (
   user_id uuid,
@@ -558,6 +573,8 @@ REVOKE EXECUTE ON FUNCTION public.admin_list_roles() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_list_roles() TO authenticated;
 
 -- 13. RPC: Super Admin - Assign role and block with Last Super Admin Safeguard
+DROP FUNCTION IF EXISTS public.admin_assign_role(text, text);
+DROP FUNCTION IF EXISTS public.admin_assign_role(text, text, text);
 CREATE OR REPLACE FUNCTION public.admin_assign_role(
   p_email text,
   p_role text,
@@ -678,6 +695,7 @@ REVOKE EXECUTE ON FUNCTION public.admin_assign_role(text, text, text) FROM PUBLI
 GRANT EXECUTE ON FUNCTION public.admin_assign_role(text, text, text) TO authenticated;
 
 -- 14. RPC: Super Admin - Revoke role with Last Super Admin Safeguard
+DROP FUNCTION IF EXISTS public.admin_revoke_role(uuid, text);
 CREATE OR REPLACE FUNCTION public.admin_revoke_role(p_user_id uuid, p_role text)
 RETURNS boolean
 LANGUAGE plpgsql

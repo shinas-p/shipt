@@ -11,8 +11,10 @@ import {
 import { loadCategories, loadProducts } from "@/lib/catalogApi";
 
 // Guest cart & wishlist keys
-const CART_KEY = "campusmart.demo.cart";
-const WISH_KEY = "campusmart.demo.wishlist";
+const CART_KEY = "shiptmart.cart";
+const WISH_KEY = "shiptmart.wishlist";
+const LEGACY_CART_KEY = "campusmart.demo.cart";
+const LEGACY_WISH_KEY = "campusmart.demo.wishlist";
 
 interface StoreCtx {
   cart: CartItem[];
@@ -78,8 +80,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      setCart(JSON.parse(localStorage.getItem(CART_KEY) || "[]"));
-      const rawWish = JSON.parse(localStorage.getItem(WISH_KEY) || "[]");
+      const storedCart = localStorage.getItem(CART_KEY) || localStorage.getItem(LEGACY_CART_KEY);
+      setCart(JSON.parse(storedCart || "[]"));
+
+      const storedWish = localStorage.getItem(WISH_KEY) || localStorage.getItem(LEGACY_WISH_KEY);
+      const rawWish = JSON.parse(storedWish || "[]");
       if (Array.isArray(rawWish)) {
         // Sanitize storage: non-empty strings only, deduplicated
         const cleanWish = Array.from(

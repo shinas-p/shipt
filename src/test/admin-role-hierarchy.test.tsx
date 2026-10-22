@@ -546,7 +546,7 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
     it("verifies public product representations never contain supplier_cost, other_costs, or margins", () => {
       const publicProduct = {
         id: "prod-101",
-        name: "Campus Notebook",
+        name: "Spiral Notebook",
         price: 60,
         original_price: 70,
         stock: 15,
@@ -577,6 +577,91 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
         expect(badge.className).toBe(meta.badgeClass);
         expect(meta.title).toBeTruthy();
         expect(meta.description).toBeTruthy();
+      }
+    });
+  });
+
+  // =========================================================================
+  // 10. RPC Parameter & Block Manager Validation Simulation
+  // =========================================================================
+  describe("10. admin_assign_role Parameter & Block Validation", () => {
+    const simulateAdminAssignRole = (
+      actorRole: AdminRole,
+      targetEmail: string,
+      targetRole: string,
+      assignedBlock?: string | null
+    ): { success: boolean; error?: string } => {
+      if (actorRole !== "super_admin") {
+        return { success: false, error: "Access Denied: Only Super Administrators can assign staff roles." };
+      }
+
+      const validRoles = ["super_admin", "owner", "store_manager", "block_manager"];
+      if (!validRoles.includes(targetRole)) {
+        return { success: false, error: `Invalid role specified: ${targetRole}. Supported roles: super_admin, owner, store_manager, block_manager` };
+      }
+
+      if (targetRole === "block_manager") {
+        if (!assignedBlock || !assignedBlock.trim()) {
+          return { success: false, error: "A valid delivery block must be assigned when designating a Block Manager." };
+        }
+        const validBlocks = ["Block A", "Block B", "Block C", "Block D", "North Wing", "South Wing", "Main Campus"];
+        if (!validBlocks.includes(assignedBlock.trim())) {
+          return { success: false, error: `Invalid delivery block "${assignedBlock}". Block must exist in delivery_blocks.` };
+        }
+      }
+
+      if (!targetEmail || !targetEmail.includes("@")) {
+        return { success: false, error: "A valid email address is required." };
+      }
+
+      return { success: true };
+    };
+
+    it("rejects assignment when caller is Owner instead of Super Admin", () => {
+      const res = simulateAdminAssignRole("owner", "staff@shiptmart.com", "store_manager");
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Access Denied");
+    });
+
+    it("rejects assignment with unsupported role identifier", () => {
+      const res = simulateAdminAssignRole("super_admin", "staff@shiptmart.com", "moderator");
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Invalid role specified");
+    });
+
+    it("rejects block_manager assignment when block is missing", () => {
+      const res = simulateAdminAssignRole("super_admin", "bm@shiptmart.com", "block_manager", null);
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("A valid delivery block must be assigned");
+    });
+
+    it("rejects block_manager assignment when block is not in delivery_blocks", () => {
+      const res = simulateAdminAssignRole("super_admin", "bm@shiptmart.com", "block_manager", "Zone 99");
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Invalid delivery block");
+    });
+
+    it("accepts valid assignments for all 4 roles", () => {
+      expect(simulateAdminAssignRole("super_admin", "sa@shiptmart.com", "super_admin").success).toBe(true);
+      expect(simulateAdminAssignRole("super_admin", "ow@shiptmart.com", "owner").success).toBe(true);
+      expect(simulateAdminAssignRole("super_admin", "sm@shiptmart.com", "store_manager").success).toBe(true);
+      expect(simulateAdminAssignRole("super_admin", "bm@shiptmart.com", "block_manager", "Block A").success).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // 11. Complete Removal of Darul Huda Branding from User Experience
+  // =========================================================================
+  describe("11. Obsolete Branding Verification", () => {
+    it("verifies branding metadata does not contain Darul Huda or DHU", () => {
+      const metadata = Object.values(ADMIN_ROLES_METADATA);
+      for (const m of metadata) {
+        expect(m.title.toLowerCase()).not.toContain("darul");
+        expect(m.title.toLowerCase()).not.toContain("huda");
+        expect(m.title.toLowerCase()).not.toContain("dhu");
+        expect(m.description.toLowerCase()).not.toContain("darul");
+        expect(m.description.toLowerCase()).not.toContain("huda");
+        expect(m.description.toLowerCase()).not.toContain("dhu");
       }
     });
   });

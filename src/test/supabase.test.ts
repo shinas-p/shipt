@@ -21,7 +21,7 @@ describe("Supabase Client Configuration", () => {
       expect(client1).toBe(client2);
       expect(client1.auth).toBeDefined();
     } else {
-      expect(() => getSupabase()).toThrowError(/\[Quick Mart Supabase\] Missing required environment variable/);
+      expect(() => getSupabase()).toThrowError(/\[Shipt Mart Supabase\] Missing required environment variable/);
     }
   });
 });

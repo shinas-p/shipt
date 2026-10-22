@@ -61,7 +61,7 @@ export function CartDrawer() {
             <div className="border-t border-border bg-secondary/50 p-5 space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Items</span><span className="font-semibold">{itemCount}</span></div>
               <div className="mt-1 flex justify-between text-lg font-bold"><span>Subtotal</span><span className="text-primary">{formatINR(subtotal)}</span></div>
-              <p className="text-xs text-muted-foreground">Delivered directly to your campus hostel room.</p>
+              <p className="text-xs text-muted-foreground">Delivered directly to your doorstep.</p>
               <div className="pt-2 space-y-2">
                 <Button asChild variant="hero" className="h-11 w-full text-sm font-bold">
                   <Link to="/checkout" onClick={() => setCartOpen(false)}>Proceed to Checkout</Link>

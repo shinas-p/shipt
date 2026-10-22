@@ -338,7 +338,7 @@ export function WishlistPage() {
                         ) : (
                           <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                             <Sparkles className="size-3 text-primary/70" />
-                            <span>Campus choice</span>
+                            <span>Top choice</span>
                           </span>
                         )}
                       </div>

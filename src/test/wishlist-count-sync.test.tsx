@@ -19,8 +19,8 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/branding", () => ({
   useBranding: () => ({
     branding: {
-      store_name: "Shipt",
-      tagline: "Your Campus. Your Marketplace.",
+      store_name: "Shipt Mart",
+      tagline: "Everyday Essentials. Delivered Fast.",
       logo_url: "",
       favicon_url: "",
       updated_at: "",
@@ -56,7 +56,7 @@ vi.mock("@/lib/reviewsApi", () => ({
 }));
 
 describe("Wishlist Synchronized Count & State System", () => {
-  const WISH_KEY = "campusmart.demo.wishlist";
+  const WISH_KEY = "shiptmart.wishlist";
 
   beforeEach(() => {
     localStorage.clear();

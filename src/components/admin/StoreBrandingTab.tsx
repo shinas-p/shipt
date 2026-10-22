@@ -230,7 +230,7 @@ export function StoreBrandingTab({
             </h2>
           </div>
           <p className="mt-1.5 text-xs sm:text-sm text-muted-foreground">
-            Configure your campus store name, official logo, browser tab favicon, and promotional tagline.
+            Configure your store name, official logo, browser tab favicon, and promotional tagline.
           </p>
         </div>
 
@@ -322,7 +322,7 @@ export function StoreBrandingTab({
                 Store Tagline <span className="text-destructive">*</span>
               </label>
               <p className="text-[11px] text-muted-foreground mt-0.5 mb-1.5">
-                Official campus slogan shown in the top banner, intro splash, and footer.
+                Official slogan shown in the top banner, intro splash, and footer.
               </p>
               <input
                 id="tagline-input"
@@ -332,11 +332,11 @@ export function StoreBrandingTab({
                 required
                 value={tagline}
                 onChange={(e) => setTagline(e.target.value)}
-                placeholder="e.g. Your Campus. Your Marketplace."
+                placeholder="e.g. Everyday Essentials. Delivered Fast."
                 className="h-10 w-full rounded-xl border border-input bg-background px-3.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:opacity-60"
               />
               <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-                <span>Default: Your Campus. Your Marketplace.</span>
+                <span>Default: Everyday Essentials. Delivered Fast.</span>
                 <span>{tagline.length} / 120</span>
               </div>
             </div>
@@ -615,7 +615,7 @@ export function StoreBrandingTab({
               </span>
               <div className="overflow-hidden rounded-xl border border-border bg-forest text-forest-foreground p-2.5 text-center text-xs font-medium">
                 <span className="mr-1.5 inline-block size-1.5 rounded-full bg-lime align-middle" />
-                <span>{storeName} — {tagline} Fast delivery across campus.</span>
+                <span>{storeName} — {tagline} Fast delivery straight to your door.</span>
               </div>
             </div>
 

@@ -27,7 +27,7 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
 
   class MockAuthAndDbService {
     users: Map<string, MockUser> = new Map();
-    adminRoles: Map<string, { role: string; created_by: string; created_at: string }> = new Map();
+    adminRoles: Map<string, { role: string; assigned_block?: string | null; created_by: string; created_at: string }> = new Map();
     profiles: Map<string, { full_name: string }> = new Map();
     sentEmails: Array<{ to: string; type: string; redirectTo: string }> = [];
 
@@ -42,6 +42,20 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
       });
       this.adminRoles.set(`${superAdminId}-super_admin`, {
         role: "super_admin",
+        created_by: superAdminId,
+        created_at: new Date().toISOString(),
+      });
+
+      // Seed existing store owner
+      const ownerId = "usr-owner-004";
+      this.users.set("owner@shiptmart.com", {
+        id: ownerId,
+        email: "owner@shiptmart.com",
+        fullName: "Store Owner",
+        role: "owner",
+      });
+      this.adminRoles.set(`${ownerId}-owner`, {
+        role: "owner",
         created_by: superAdminId,
         created_at: new Date().toISOString(),
       });
@@ -71,7 +85,14 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
     // Server-side Edge Function handler simulation
     async executeAdminCreateStaff(
       callerId: string,
-      payload: { email: string; fullName?: string; role: string; redirectTo?: string },
+      payload: {
+        email: string;
+        fullName?: string;
+        role: string;
+        assigned_block?: string | null;
+        assignedBlock?: string | null;
+        redirectTo?: string;
+      },
       options: { simulateRoleAssignFailure?: boolean } = {}
     ): Promise<{ status: number; body: any }> {
       // 1. Authenticate caller
@@ -108,6 +129,32 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
           body: { error: `Invalid role "${requestedRole}". Supported roles: super_admin, owner, store_manager, block_manager.` },
         };
       }
+
+      const rawAssignedBlock =
+        typeof payload.assigned_block === "string"
+          ? payload.assigned_block.trim()
+          : typeof payload.assignedBlock === "string"
+          ? payload.assignedBlock.trim()
+          : null;
+
+      const validBlocks = ["Block A", "Block B", "Block C", "Block D", "North Wing", "South Wing", "Main Campus"];
+
+      if (requestedRole === "block_manager") {
+        if (!rawAssignedBlock) {
+          return {
+            status: 400,
+            body: { error: "A valid delivery block must be assigned when designating a Block Manager." },
+          };
+        }
+        if (!validBlocks.includes(rawAssignedBlock)) {
+          return {
+            status: 400,
+            body: { error: `Invalid delivery block "${rawAssignedBlock}". Block must exist in delivery_blocks.` },
+          };
+        }
+      }
+
+      const assignedBlock = requestedRole === "block_manager" ? rawAssignedBlock : null;
 
       // 4. Duplicate check: If user already exists in Auth
       if (this.users.has(cleanEmail)) {
@@ -164,6 +211,7 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
 
       this.adminRoles.set(`${newUserId}-${requestedRole}`, {
         role: requestedRole,
+        assigned_block: assignedBlock,
         created_by: callerId,
         created_at: new Date().toISOString(),
       });
@@ -182,6 +230,7 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
             email: cleanEmail,
             fullName: cleanName,
             role: requestedRole,
+            assigned_block: assignedBlock,
           },
         },
       };
@@ -261,6 +310,87 @@ describe("Shipt — Staff Creation & Onboarding Security Suite", { timeout: 2500
       expect(res.status).toBe(403);
       expect(res.body.error).toContain("Access Denied");
       expect(service.users.has("newmanager@campus.edu")).toBe(false);
+    });
+
+    it("allows authorized Super Admin to create a Store Owner without prior registration", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "newowner@shiptmart.com",
+        fullName: "Sarah Johnson",
+        role: "owner",
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.role).toBe("owner");
+      expect(service.users.has("newowner@shiptmart.com")).toBe(true);
+      expect(service.adminRoles.get(`${res.body.user.id}-owner`)?.role).toBe("owner");
+    });
+
+    it("rejects Block Manager creation when assigned block is missing (400 Bad Request)", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "blockmanager@shiptmart.com",
+        fullName: "Kiran Rao",
+        role: "block_manager",
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("A valid delivery block must be assigned");
+      expect(service.users.has("blockmanager@shiptmart.com")).toBe(false);
+    });
+
+    it("rejects Block Manager creation when assigned block is invalid (400 Bad Request)", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "blockmanager@shiptmart.com",
+        fullName: "Kiran Rao",
+        role: "block_manager",
+        assigned_block: "Invalid Nonexistent Zone",
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("Invalid delivery block");
+      expect(service.users.has("blockmanager@shiptmart.com")).toBe(false);
+    });
+
+    it("allows authorized Super Admin to create a Block Manager with valid assigned block", async () => {
+      const service = new MockAuthAndDbService();
+      const superAdminId = "usr-super-admin-001";
+
+      const res = await service.executeAdminCreateStaff(superAdminId, {
+        email: "blockmanager.a@shiptmart.com",
+        fullName: "Kiran Rao",
+        role: "block_manager",
+        assigned_block: "Block A",
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user.role).toBe("block_manager");
+      expect(res.body.user.assigned_block).toBe("Block A");
+      expect(service.adminRoles.get(`${res.body.user.id}-block_manager`)?.assigned_block).toBe("Block A");
+    });
+
+    it("rejects Store Owner from creating or promoting staff accounts (403 Forbidden)", async () => {
+      const service = new MockAuthAndDbService();
+      const ownerId = "usr-owner-004";
+
+      const res = await service.executeAdminCreateStaff(ownerId, {
+        email: "anotherstaff@shiptmart.com",
+        fullName: "Unauthorized Owner Addition",
+        role: "store_manager",
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toContain("Access Denied");
+      expect(service.users.has("anotherstaff@shiptmart.com")).toBe(false);
     });
 
     it("prevents duplicate account creation when email already belongs to an existing user (409 Conflict)", async () => {

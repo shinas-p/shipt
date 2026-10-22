@@ -422,7 +422,7 @@ interface FormErrors {
           <div className="flex items-center justify-between">
             <div>
               <DialogTitle className="font-display text-xl font-bold text-foreground">
-                {product ? `Edit Product: ${product.name}` : "Add New Campus Product"}
+                {product ? `Edit Product: ${product.name}` : "Add New Product"}
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground mt-1">
                 Configure catalogue information, pricing, live inventory, and multi-image assets.

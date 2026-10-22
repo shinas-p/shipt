@@ -64,7 +64,6 @@ export function ProductDetailsModal() {
                 <ExternalLink className="size-3" />
               </Link>
             </div>
-            <p className="text-xs text-muted-foreground">Demo product · sample price</p>
           </div>
         </div>
       </DialogContent>

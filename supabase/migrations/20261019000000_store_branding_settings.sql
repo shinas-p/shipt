@@ -7,8 +7,8 @@
 -- 1. Create store_settings table
 CREATE TABLE IF NOT EXISTS public.store_settings (
   id text PRIMARY KEY DEFAULT 'default' CHECK (id = 'default'),
-  store_name text NOT NULL DEFAULT 'Shipt',
-  tagline text NOT NULL DEFAULT 'Your Campus. Your Marketplace.',
+  store_name text NOT NULL DEFAULT 'Shipt Mart',
+  tagline text NOT NULL DEFAULT 'Everyday Essentials. Delivered Fast.',
   logo_url text,
   favicon_url text,
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -33,5 +33,5 @@ CREATE POLICY "store_settings_super_admin_modify" ON public.store_settings
 
 -- 4. Seed default settings row if not present
 INSERT INTO public.store_settings (id, store_name, tagline, logo_url, favicon_url)
-VALUES ('default', 'Shipt', 'Your Campus. Your Marketplace.', NULL, NULL)
+VALUES ('default', 'Shipt Mart', 'Everyday Essentials. Delivered Fast.', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;

@@ -79,7 +79,7 @@ export function getSupabase(): SupabaseClient {
   const { valid, missing } = validateSupabaseConfig();
   if (!valid) {
     throw new Error(
-      `[Quick Mart Supabase] Missing required environment variable(s): ${missing.join(
+      `[Shipt Mart Supabase] Missing required environment variable(s): ${missing.join(
         ", "
       )}. Please configure them in your .env.local file.`
     );

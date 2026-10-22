@@ -94,7 +94,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           service: "admin-create-staff",
-          version: 5,
+          version: 6,
           target_canonical_redirect: testTargetRedirect,
           gotrue_resolved_redirect: resolvedRedirect,
           is_canonical_matched: isCanonicalMatched,
@@ -237,10 +237,43 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const assignedBlock =
-      requestedRole === "block_manager" && typeof body.assigned_block === "string"
+    const rawAssignedBlock =
+      typeof body.assigned_block === "string"
         ? body.assigned_block.trim()
+        : typeof body.assignedBlock === "string"
+        ? body.assignedBlock.trim()
         : null;
+
+    let assignedBlock: string | null = null;
+
+    if (requestedRole === "block_manager") {
+      if (!rawAssignedBlock) {
+        return new Response(
+          JSON.stringify({
+            error: "A valid delivery block must be assigned when designating a Block Manager.",
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Validate delivery block exists in public.delivery_blocks
+      const { data: blockRecord, error: blockLookupError } = await adminClient
+        .from("delivery_blocks")
+        .select("id")
+        .eq("id", rawAssignedBlock)
+        .maybeSingle();
+
+      if (blockLookupError || !blockRecord) {
+        return new Response(
+          JSON.stringify({
+            error: `Invalid delivery block "${rawAssignedBlock}". Block must exist in delivery_blocks.`,
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      assignedBlock = rawAssignedBlock;
+    }
 
     // 6. Safe User Invitation via Supabase Auth Admin API
     // Populate full_name, name, and first_name in user_metadata so email templates

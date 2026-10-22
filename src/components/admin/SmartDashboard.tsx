@@ -337,7 +337,7 @@ export function SmartDashboard({
                   Welcome, Block Delivery Manager
                 </h2>
                 <p className="text-xs sm:text-sm text-muted-foreground">
-                  Coordinate local deliveries and update order fulfillment for your assigned campus zone.
+                  Coordinate local deliveries and update order fulfillment for your assigned delivery zone.
                 </p>
               </div>
 
@@ -549,7 +549,7 @@ export function SmartDashboard({
               </span>
             </h2>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              {roleMeta?.description || "Here is your live campus store snapshot and quick-action control center."}
+              {roleMeta?.description || "Here is your live store snapshot and quick-action control center."}
             </p>
           </div>
 
@@ -871,7 +871,7 @@ export function SmartDashboard({
               <span className="block text-xs font-bold text-foreground group-hover:text-primary transition">
                 Categories
               </span>
-              <span className="block text-[10px] text-muted-foreground">Campus taxonomy</span>
+              <span className="block text-[10px] text-muted-foreground">Store taxonomy</span>
             </div>
           </button>
 
@@ -939,7 +939,7 @@ export function SmartDashboard({
                     7-Day Paid Sales Trend
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    Aggregated daily from verified paid & completed campus orders
+                    Aggregated daily from verified paid & completed orders
                   </p>
                 </div>
               </div>
@@ -1071,7 +1071,7 @@ export function SmartDashboard({
                   <CheckCircle2 className="size-9 text-emerald-500 mx-auto mb-2" />
                   <p className="text-xs font-bold text-foreground">Healthy Inventory</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5 max-w-xs mx-auto">
-                    All campus catalog products currently have 6 or more units in stock.
+                    All catalog products currently have 6 or more units in stock.
                   </p>
                 </div>
               ) : (
@@ -1149,7 +1149,7 @@ export function SmartDashboard({
             <div>
               <h3 className="font-display text-base font-bold text-foreground">Recent Customer Orders</h3>
               <p className="text-xs text-muted-foreground">
-                Latest orders received from student campus community
+                Latest orders received from customers
               </p>
             </div>
           </div>
@@ -1180,7 +1180,7 @@ export function SmartDashboard({
               <ShoppingBag className="size-10 text-muted-foreground/40 mx-auto mb-2" />
               <p className="text-sm font-bold text-foreground">No orders recorded yet</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                Orders placed through campus checkout will appear here instantly with live tracking, delivery details, and fulfillment controls.
+                Orders placed through checkout will appear here instantly with live tracking, delivery details, and fulfillment controls.
               </p>
               <div className="mt-4 flex justify-center gap-2">
                 <Button asChild size="sm" variant="outline" className="text-xs">

@@ -275,7 +275,7 @@ export function ProductTable({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <h3 className="font-display text-base font-bold text-foreground">
-              Campus Catalogue ({totalItems} items)
+              Product Catalogue ({totalItems} items)
             </h3>
             {selectedIds.length > 0 && (
               <Badge variant="outline" className="text-xs font-bold text-primary border-primary/30">

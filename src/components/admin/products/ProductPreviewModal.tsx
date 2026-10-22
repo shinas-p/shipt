@@ -58,7 +58,7 @@ export function ProductPreviewModal({
                 </Badge>
               </div>
               <DialogDescription className="mt-1 text-xs text-muted-foreground">
-                Verify exactly how campus students will see this product on both desktop and mobile storefronts.
+                Verify exactly how customers will see this product on both desktop and mobile storefronts.
               </DialogDescription>
             </div>
 
@@ -243,11 +243,11 @@ export function ProductPreviewModal({
                         ? "Out of Stock"
                         : isLowStock
                         ? `Low Stock: Only ${product.stock} units remaining`
-                        : `${product.stock} units in campus warehouse`}
+                        : `${product.stock} units in warehouse`}
                     </span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Estimated hostel room delivery within 15–30 minutes after order placement.
+                    Estimated delivery within 15–30 minutes after order placement.
                   </p>
                 </div>
 

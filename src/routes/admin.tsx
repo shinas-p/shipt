@@ -1389,7 +1389,7 @@ export function AdminPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="staff@shipt.campus"
+                placeholder="staff@shiptmart.com"
                 className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
               />
             </div>
@@ -1748,7 +1748,7 @@ export function AdminPage() {
                       <strong className="text-foreground">
                         {ord.delivery_method === "hostel_delivery"
                           ? `${ord.hostel || "Hostel"}${ord.block ? ` - ${ord.block}` : ""}${ord.room ? `, Rm ${ord.room}` : ""}`
-                          : ord.pickup_location || "Campus Pickup"}
+                          : ord.pickup_location || "Store Pickup"}
                       </strong>
                     </div>
                   </div>
@@ -1916,12 +1916,12 @@ export function AdminPage() {
                         <span>
                           {selectedAdminOrder.delivery_method === "hostel_delivery"
                             ? "Hostel Delivery"
-                            : "Campus Pickup"}
+                            : "Store Pickup"}
                         </span>
                       </div>
                       <p className="font-bold text-sm text-foreground">
                         {selectedAdminOrder.delivery_method === "hostel_delivery"
-                          ? `${selectedAdminOrder.hostel || "Campus Hostel"}${
+                          ? `${selectedAdminOrder.hostel || "Hostel / Residence"}${
                               selectedAdminOrder.block ? `, Block ${selectedAdminOrder.block}` : ""
                             }${selectedAdminOrder.room ? `, Room ${selectedAdminOrder.room}` : ""}`
                           : selectedAdminOrder.pickup_location || "Store Counter"}
@@ -2202,7 +2202,7 @@ export function AdminPage() {
                   )}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Configure wide full-image promotional banners with custom destination routing across the campus store.
+                  Configure wide full-image promotional banners with custom destination routing across the store.
                 </p>
               </div>
 
@@ -2355,7 +2355,7 @@ export function AdminPage() {
                   {(newBanner.title || newBanner.description || newBanner.button_text) && (
                     <div className="absolute inset-y-0 left-0 z-10 flex items-center p-3 max-w-xs">
                       <div className="rounded-xl border border-white/20 bg-black/45 p-3 backdrop-blur-md text-white shadow-md">
-                        <span className="text-[10px] font-bold text-lime">Campus Special</span>
+                        <span className="text-[10px] font-bold text-lime">Special Offer</span>
                         {newBanner.title && (
                           <h4 className="font-display text-sm font-bold text-white mt-0.5 line-clamp-1">
                             {newBanner.title}
@@ -2556,7 +2556,7 @@ export function AdminPage() {
                     required
                     value={createStaffEmail}
                     onChange={(e) => setCreateStaffEmail(e.target.value)}
-                    placeholder="manager@shipt.campus or faculty@university.edu"
+                    placeholder="manager@shiptmart.com or staff@shiptmart.com"
                     className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                   />
                 </div>
@@ -2643,7 +2643,7 @@ export function AdminPage() {
                       required
                       value={newRoleEmail}
                       onChange={(e) => setNewRoleEmail(e.target.value)}
-                      placeholder="student@dhuniversity.edu"
+                      placeholder="user@shiptmart.com or staff@shiptmart.com"
                       className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                     />
                   </div>

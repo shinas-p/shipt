@@ -1,7 +1,7 @@
 # Shipt Coins — Loyalty & Rewards Programme Implementation Plan
 
 ## Executive Overview
-**Shipt Coins** is a planned customer loyalty programme designed specifically for Darul Huda University residential campus students. It rewards registered campus customers for everyday purchases (snacks, stationery, hostel essentials, electronics) and encourages repeat orders while preserving strict financial integrity and server-side validation.
+**Shipt Coins** is a planned customer loyalty programme designed specifically for Shipt Mart customers. It rewards registered customers for everyday purchases (snacks, stationery, essentials, electronics) and encourages repeat orders while preserving strict financial integrity and server-side validation.
 
 > [!NOTE]
 > Per project directives, **no coin balances, database tables, redemption logic, or coin-related UI are to be implemented in this release**. This plan outlines the exact architectural blueprint, database schema, transactional state machine, and security boundaries for a future, separately reviewed Supabase migration.
