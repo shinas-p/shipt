@@ -59,15 +59,18 @@ import { toast } from "sonner";
 import { SmartDashboard } from "@/components/admin/SmartDashboard";
 import { ProductManagementCenter } from "@/components/admin/products/ProductManagementCenter";
 import { StoreBrandingTab } from "@/components/admin/StoreBrandingTab";
+import { BlockManagementTab } from "@/components/admin/BlockManagementTab";
 import type { DBCategory } from "@/components/admin/products/types";
 import {
   AdminRole,
   canManageCatalog,
   canManageBanners,
   canManageRoles,
+  canManageBlocks,
   canManageBranding,
   canViewAllOrders,
   canViewAuditLogs,
+  canAccessOrder,
   getRoleBadge,
   ADMIN_ROLES_METADATA,
 } from "@/lib/permissions";
@@ -111,6 +114,7 @@ interface AdminOrder {
   customer_name: string;
   customer_phone: string;
   delivery_method: string;
+  delivery_block_id?: string | null;
   hostel?: string | null;
   block?: string | null;
   room?: string | null;
@@ -123,6 +127,11 @@ interface AdminOrder {
   total_amount: number;
   payment_method: string;
   payment_status: string;
+  claimed_by?: string | null;
+  claimed_at?: string | null;
+  processing_started_at?: string | null;
+  completed_at?: string | null;
+  cancelled_at?: string | null;
   created_at: string;
   updated_at?: string;
   order_items?: AdminOrderItem[];
@@ -212,13 +221,15 @@ export function AdminPage() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'branding'
-  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "branding">("dashboard");
+  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'blocks' | 'branding'
+  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding">("dashboard");
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orderFilter, setOrderFilter] = useState("all");
+  const [orderBlockFilter, setOrderBlockFilter] = useState("all");
+  const [isClaimingOrder, setIsClaimingOrder] = useState<string | null>(null);
   const [selectedAdminOrder, setSelectedAdminOrder] = useState<AdminOrder | null>(null);
   const [statusUpdateNotes, setStatusUpdateNotes] = useState("");
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
@@ -406,6 +417,9 @@ export function AdminPage() {
         if (!canManageRoles(resolvedRole) && prevTab === "roles") {
           return "dashboard";
         }
+        if (!canManageBlocks(resolvedRole) && prevTab === "blocks") {
+          return "dashboard";
+        }
         if (!canManageBranding(resolvedRole) && prevTab === "branding") {
           return "dashboard";
         }
@@ -437,6 +451,7 @@ export function AdminPage() {
           customer_name,
           customer_phone,
           delivery_method,
+          delivery_block_id,
           hostel,
           block,
           room,
@@ -449,6 +464,11 @@ export function AdminPage() {
           total_amount,
           payment_method,
           payment_status,
+          claimed_by,
+          claimed_at,
+          processing_started_at,
+          completed_at,
+          cancelled_at,
           created_at,
           updated_at,
           order_items(
@@ -737,6 +757,56 @@ export function AdminPage() {
       setIsUpdatingStatus(false);
     }
   };
+
+  const handleClaimOrder = async (orderId: string) => {
+    if (!orderId) return;
+    setIsClaimingOrder(orderId);
+    try {
+      const { data, error } = await supabase.rpc("admin_claim_order", {
+        p_order_id: orderId,
+      });
+
+      if (error) {
+        toast.error(`Unable to claim order: ${error.message}`);
+        return;
+      }
+
+      toast.success("Order claimed successfully!");
+      const freshOrders = await loadOrders();
+      if (freshOrders && selectedAdminOrder && selectedAdminOrder.id === orderId) {
+        const fresh = freshOrders.find((o) => o.id === orderId);
+        if (fresh) setSelectedAdminOrder(fresh);
+      }
+    } catch (err: any) {
+      toast.error(`Claim error: ${err?.message}`);
+    } finally {
+      setIsClaimingOrder(null);
+    }
+  };
+
+  // Realtime live update on orders across all staff dashboards
+  useEffect(() => {
+    if (!isSupabaseConfigured || !isAdmin) return;
+
+    const channel = supabase
+      .channel("admin-orders-realtime-sub")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => {
+          loadOrders();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadOrders]);
 
   // ==========================================
   // INVENTORY PRODUCT UPLOAD & EDIT ACTIONS
@@ -1434,9 +1504,39 @@ export function AdminPage() {
     );
   }
 
-  // Filtered orders
-  const filteredOrders =
-    orderFilter === "all" ? orders : orders.filter((o) => o.status === orderFilter);
+  // Scoped orders enforcing role boundaries
+  const scopedOrders = useMemo(() => {
+    return orders.filter((o) => {
+      // Store Manager: Strictly limited to Store Pickup orders
+      if (adminRole === "store_manager") {
+        return o.delivery_method === "campus_pickup";
+      }
+      // Block Manager: Strictly limited to assigned delivery block
+      if (adminRole === "block_manager") {
+        if (o.delivery_method === "campus_pickup") return false;
+        const b = o.delivery_block_id || o.block;
+        return Boolean(assignedBlock && b && assignedBlock.toLowerCase() === b.toLowerCase());
+      }
+      // Super Admin and Owner: View all orders across all blocks
+      return true;
+    });
+  }, [orders, adminRole, assignedBlock]);
+
+  // Filtered orders applying status and block filters
+  const filteredOrders = useMemo(() => {
+    return scopedOrders.filter((o) => {
+      if (orderFilter !== "all" && o.status !== orderFilter) return false;
+      if (orderBlockFilter !== "all") {
+        if (orderBlockFilter === "campus_pickup") {
+          if (o.delivery_method !== "campus_pickup") return false;
+        } else {
+          const b = o.delivery_block_id || o.block;
+          if (b !== orderBlockFilter) return false;
+        }
+      }
+      return true;
+    });
+  }, [scopedOrders, orderFilter, orderBlockFilter]);
 
   // Filtered products
   const filteredProducts = dbProducts.filter((p) => {
@@ -1539,8 +1639,10 @@ export function AdminPage() {
           <Package className="size-4" />
           <span>
             {adminRole === "block_manager"
-              ? `Block Orders (${orders.length})`
-              : `Orders (${orders.length})`}
+              ? `Block Orders (${scopedOrders.length})`
+              : adminRole === "store_manager"
+              ? `Pickup Orders (${scopedOrders.length})`
+              : `Orders (${scopedOrders.length})`}
           </span>
         </button>
 
@@ -1557,6 +1659,23 @@ export function AdminPage() {
           >
             <Layers className="size-4" />
             <span>Products & Stock ({dbProducts.length})</span>
+          </button>
+        )}
+
+        {/* Super Admin & Owner: Delivery Blocks */}
+        {canManageBlocks(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("blocks")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "blocks"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <Building2 className="size-4" />
+            <span>Delivery Blocks</span>
           </button>
         )}
 
@@ -1616,7 +1735,7 @@ export function AdminPage() {
       {activeTab === "dashboard" && (
         <div className="mt-6">
           <SmartDashboard
-            orders={orders}
+            orders={scopedOrders}
             products={dbProducts}
             ordersLoading={ordersLoading}
             productsLoading={productsLoading}
@@ -1663,8 +1782,8 @@ export function AdminPage() {
       {activeTab === "orders" && (
         <div className="mt-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-muted-foreground">Filter status:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground">Status:</span>
               <select
                 value={orderFilter}
                 onChange={(e) => setOrderFilter(e.target.value)}
@@ -1679,6 +1798,25 @@ export function AdminPage() {
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
+
+              {(adminRole === "super_admin" || adminRole === "owner") && (
+                <>
+                  <span className="text-xs font-semibold text-muted-foreground ml-2">Sector:</span>
+                  <select
+                    value={orderBlockFilter}
+                    onChange={(e) => setOrderBlockFilter(e.target.value)}
+                    className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs font-medium outline-none"
+                  >
+                    <option value="all">All Sectors & Pickup</option>
+                    <option value="campus_pickup">Store / Counter Pickup Only</option>
+                    {availableBlocks.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
 
             <Button variant="outline" size="sm" onClick={loadOrders} className="h-8 gap-1 text-xs">
@@ -1700,7 +1838,7 @@ export function AdminPage() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3.5">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-base font-extrabold text-foreground">{ord.order_number}</span>
                         <span
                           className={cn(
@@ -1717,9 +1855,32 @@ export function AdminPage() {
                         <Badge variant="outline" className="text-[10px] text-muted-foreground">
                           {ord.user_id ? "Registered" : "Guest"}
                         </Badge>
+                        <Badge variant="outline" className="text-[10px] font-bold bg-primary/5 text-primary border-primary/20">
+                          {ord.delivery_method === "campus_pickup"
+                            ? "Store Pickup"
+                            : `Block: ${ord.delivery_block_id || ord.block || "Unassigned"}`}
+                        </Badge>
+                        {ord.claimed_by ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-bold",
+                              ord.claimed_by === session?.user?.id
+                                ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30"
+                                : "bg-secondary text-secondary-foreground border-border"
+                            )}
+                          >
+                            Claimed by {ord.claimed_by === session?.user?.id ? "You" : ord.claimed_by.slice(0, 8)}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] font-bold bg-amber-500/10 text-amber-700 border-amber-500/30">
+                            Unclaimed
+                          </Badge>
+                        )}
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         Placed on {new Date(ord.created_at).toLocaleString()}
+                        {ord.claimed_at && ` · Claimed at ${new Date(ord.claimed_at).toLocaleTimeString()}`}
                       </p>
                     </div>
 
@@ -1796,7 +1957,21 @@ export function AdminPage() {
 
                   {/* Order Actions Toolbar */}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3.5">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {!ord.claimed_by && (ord.status === "placed" || ord.status === "confirmed") && (
+                        <Button
+                          type="button"
+                          variant="hero"
+                          size="sm"
+                          disabled={isClaimingOrder === ord.id}
+                          onClick={() => handleClaimOrder(ord.id)}
+                          className="h-8 gap-1.5 text-xs font-bold"
+                        >
+                          <UserCheck className="size-3.5" />
+                          <span>{isClaimingOrder === ord.id ? "Claiming..." : "Claim Order"}</span>
+                        </Button>
+                      )}
+
                       <span className="text-xs font-semibold text-muted-foreground">Quick Status:</span>
                       <select
                         value={ord.status}
@@ -1930,6 +2105,77 @@ export function AdminPage() {
                         <p className="rounded-lg bg-card/80 p-2 text-[11px] text-muted-foreground italic border border-border/40">
                           "{selectedAdminOrder.delivery_instructions}"
                         </p>
+                      )}
+                    </div>
+
+                    {/* Delivery Sector, Claim Status & Milestone Tracking Card */}
+                    <div className="rounded-2xl border border-border bg-secondary/30 p-4 space-y-2.5 text-xs sm:col-span-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2">
+                        <div className="flex items-center gap-2">
+                          <Building2 className="size-4 text-primary" />
+                          <span className="font-semibold text-foreground">Delivery Block / Sector:</span>
+                          <Badge variant="outline" className="font-bold text-xs bg-primary/10 text-primary border-primary/30">
+                            {selectedAdminOrder.delivery_method === "campus_pickup"
+                              ? "Store Pickup Hub"
+                              : selectedAdminOrder.delivery_block_id || selectedAdminOrder.block || "Unassigned Sector"}
+                          </Badge>
+                        </div>
+                        <div>
+                          {selectedAdminOrder.claimed_by ? (
+                            <Badge variant="outline" className="font-bold text-xs bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
+                              Claimed by {selectedAdminOrder.claimed_by === session?.user?.id ? "You" : selectedAdminOrder.claimed_by.slice(0, 8)}
+                              {selectedAdminOrder.claimed_at && ` at ${new Date(selectedAdminOrder.claimed_at).toLocaleTimeString()}`}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="font-bold text-xs bg-amber-500/10 text-amber-700 border-amber-500/30">
+                              Unclaimed
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Milestones grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                        <div className="rounded-xl bg-card/60 p-2 border border-border/40">
+                          <span className="text-muted-foreground block text-[10px]">Claimed:</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedAdminOrder.claimed_at ? new Date(selectedAdminOrder.claimed_at).toLocaleTimeString() : "Unclaimed"}
+                          </span>
+                        </div>
+                        <div className="rounded-xl bg-card/60 p-2 border border-border/40">
+                          <span className="text-muted-foreground block text-[10px]">Processing Started:</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedAdminOrder.processing_started_at ? new Date(selectedAdminOrder.processing_started_at).toLocaleTimeString() : "Pending"}
+                          </span>
+                        </div>
+                        <div className="rounded-xl bg-card/60 p-2 border border-border/40">
+                          <span className="text-muted-foreground block text-[10px]">Completed:</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedAdminOrder.completed_at ? new Date(selectedAdminOrder.completed_at).toLocaleTimeString() : "—"}
+                          </span>
+                        </div>
+                        <div className="rounded-xl bg-card/60 p-2 border border-border/40">
+                          <span className="text-muted-foreground block text-[10px]">Cancelled:</span>
+                          <span className="font-semibold text-foreground">
+                            {selectedAdminOrder.cancelled_at ? new Date(selectedAdminOrder.cancelled_at).toLocaleTimeString() : "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!selectedAdminOrder.claimed_by && (selectedAdminOrder.status === "placed" || selectedAdminOrder.status === "confirmed") && (
+                        <div className="pt-1.5 flex justify-end">
+                          <Button
+                            type="button"
+                            variant="hero"
+                            size="sm"
+                            disabled={isClaimingOrder === selectedAdminOrder.id}
+                            onClick={() => handleClaimOrder(selectedAdminOrder.id)}
+                            className="h-8 gap-1.5 text-xs font-bold w-full sm:w-auto"
+                          >
+                            <UserCheck className="size-3.5" />
+                            <span>{isClaimingOrder === selectedAdminOrder.id ? "Claiming Order..." : "Claim & Take Ownership"}</span>
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -2907,6 +3153,11 @@ export function AdminPage() {
             onNavigateStorefront={() => {}}
           />
         </div>
+      )}
+
+      {/* TAB 6: DELIVERY BLOCKS ARCHITECTURE (Super Admin & Owner) */}
+      {activeTab === "blocks" && canManageBlocks(adminRole) && (
+        <BlockManagementTab adminRole={adminRole} />
       )}
     </div>
   );

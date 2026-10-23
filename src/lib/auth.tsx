@@ -45,6 +45,7 @@ export interface CustomerOrderSummary {
   delivery_fee: number;
   discount_amount?: number;
   delivery_method: string;
+  delivery_block_id?: string | null;
   hostel?: string | null;
   block?: string | null;
   room?: string | null;
@@ -508,6 +509,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           delivery_fee,
           discount_amount,
           delivery_method,
+          delivery_block_id,
           hostel,
           block,
           room,

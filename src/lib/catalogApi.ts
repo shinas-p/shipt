@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { categories as defaultCategories, products as defaultProducts } from "@/data/products";
-import type { Category, Product, CategoryId, CheckoutFormData, CartItem, PlacedOrderResult, TrackedOrder } from "@/lib/types";
+import type { Category, Product, CategoryId, CheckoutFormData, CartItem, PlacedOrderResult, TrackedOrder, DeliveryBlock } from "@/lib/types";
 
 import promoFallback from "@/assets/promo.jpg";
 
@@ -155,6 +155,37 @@ export async function loadProducts(): Promise<Product[]> {
 }
 
 /**
+ * Loads active delivery blocks from Supabase with graceful fallback
+ */
+export async function loadActiveDeliveryBlocks(): Promise<DeliveryBlock[]> {
+  const fallbackBlocks: DeliveryBlock[] = [
+    { id: "Block A", name: "Block A", is_active: true },
+    { id: "Block B", name: "Block B", is_active: true },
+    { id: "Main Campus", name: "Main Campus", is_active: true },
+  ];
+
+  if (!isSupabaseConfigured) {
+    return fallbackBlocks;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("delivery_blocks")
+      .select("id, name, description, is_active, created_at")
+      .eq("is_active", true)
+      .order("name", { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      return fallbackBlocks;
+    }
+
+    return data as DeliveryBlock[];
+  } catch {
+    return fallbackBlocks;
+  }
+}
+
+/**
  * Places an order via the transactional SECURITY DEFINER RPC `create_order_with_inventory`
  */
 export async function placeOrder(
@@ -165,13 +196,16 @@ export async function placeOrder(
     return { success: false, error: "Your cart is empty." };
   }
 
+  const selectedBlock = form.deliveryBlockId || form.block || "";
+
   const payload = {
     customer_name: form.name.trim(),
     customer_phone: form.phone.trim(),
     delivery_method: form.deliveryMethod,
-    hostel: form.deliveryMethod === "hostel_delivery" ? form.hostel : null,
-    block: form.deliveryMethod === "hostel_delivery" ? form.block : null,
-    room: form.deliveryMethod === "hostel_delivery" ? form.room : null,
+    delivery_block_id: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
+    hostel: form.deliveryMethod === "hostel_delivery" ? (form.hostel || selectedBlock) : null,
+    block: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
+    room: form.deliveryMethod === "hostel_delivery" ? form.room.trim() : null,
     pickup_location: form.deliveryMethod === "campus_pickup" ? form.pickupLocation : null,
     delivery_instructions: form.instructions?.trim() || null,
     payment_method: form.payment,

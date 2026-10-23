@@ -18,17 +18,9 @@ import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { useCustomerAuth } from "@/lib/auth";
 import { formatINR } from "@/data/products";
-import type { CheckoutFormData, PlacedOrderResult } from "@/lib/types";
-import { placeOrder } from "@/lib/catalogApi";
+import type { CheckoutFormData, PlacedOrderResult, DeliveryBlock } from "@/lib/types";
+import { placeOrder, loadActiveDeliveryBlocks } from "@/lib/catalogApi";
 import { cn } from "@/lib/utils";
-
-const HOSTELS = [
-  "Ganga Hostel",
-  "Yamuna Hostel",
-  "Kaveri Hostel",
-  "Narmada Hostel",
-  "International House",
-];
 
 const PICKUP_LOCATIONS = [
   "Shipt Mart Hub — Central Dispatch Point",
@@ -45,9 +37,8 @@ function validate(f: CheckoutFormData): Errors {
     e.phone = "Enter a valid 10-digit mobile number.";
 
   if (f.deliveryMethod === "hostel_delivery") {
-    if (!f.hostel) e.hostel = "Select your hostel or building.";
-    if (!f.block.trim()) e.block = "Enter your block or building.";
-    if (!f.room.trim()) e.room = "Enter your room number.";
+    if (!f.deliveryBlockId && !f.block) e.deliveryBlockId = "Please select your delivery block.";
+    if (!f.room.trim()) e.room = "Enter your room or unit number.";
   } else {
     if (!f.pickupLocation) e.pickupLocation = "Select a pickup location.";
   }
@@ -88,10 +79,27 @@ export function CheckoutForm() {
   const { cart, subtotal, itemCount, clear, getProduct } = useStore();
   const { user, profile } = useCustomerAuth();
 
+  const [deliveryBlocks, setDeliveryBlocks] = useState<DeliveryBlock[]>([]);
+  const [loadingBlocks, setLoadingBlocks] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    loadActiveDeliveryBlocks().then((blocks) => {
+      if (active) {
+        setDeliveryBlocks(blocks);
+        setLoadingBlocks(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const [f, setF] = useState<CheckoutFormData>({
     name: "",
     phone: "",
     deliveryMethod: "hostel_delivery",
+    deliveryBlockId: "",
     hostel: "",
     block: "",
     room: "",
@@ -107,7 +115,8 @@ export function CheckoutForm() {
         ...prev,
         name: prev.name || profile.full_name || "",
         phone: prev.phone || profile.phone || "",
-        hostel: prev.hostel || profile.default_hostel || "",
+        deliveryBlockId: prev.deliveryBlockId || profile.default_block || "",
+        hostel: prev.hostel || profile.default_hostel || profile.default_block || "",
         block: prev.block || profile.default_block || "",
         room: prev.room || profile.default_room || "",
       }));
@@ -473,42 +482,43 @@ export function CheckoutForm() {
           {/* Conditional Delivery Inputs */}
           {f.deliveryMethod === "hostel_delivery" ? (
             <div className="mt-5 grid gap-4 sm:grid-cols-2 border-t border-border/60 pt-4">
-              <Field id="hostel" label="Hostel / Building" error={errors.hostel}>
+              <Field id="deliveryBlockId" label="Delivery Block" error={errors.deliveryBlockId || errors.block}>
                 <select
-                  {...a("hostel")}
+                  {...a("deliveryBlockId")}
                   className={inputCls}
-                  value={f.hostel}
-                  onChange={(e) => set("hostel", e.target.value)}
+                  value={f.deliveryBlockId || f.block}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setF((prev) => ({
+                      ...prev,
+                      deliveryBlockId: val,
+                      block: val,
+                      hostel: val,
+                    }));
+                    setErrors((err) => ({ ...err, deliveryBlockId: undefined, block: undefined }));
+                  }}
+                  disabled={loadingBlocks}
                 >
-                  <option value="">Select hostel or building</option>
-                  {HOSTELS.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
+                  <option value="">
+                    {loadingBlocks ? "Loading available delivery blocks..." : "Select your delivery block"}
+                  </option>
+                  {deliveryBlocks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}{b.description ? ` (${b.description})` : ""}
                     </option>
                   ))}
                 </select>
               </Field>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Field id="block" label="Block / Wing" error={errors.block}>
-                  <input
-                    {...a("block")}
-                    className={inputCls}
-                    value={f.block}
-                    onChange={(e) => set("block", e.target.value)}
-                    placeholder="e.g. Block A"
-                  />
-                </Field>
-                <Field id="room" label="Room no." error={errors.room}>
-                  <input
-                    {...a("room")}
-                    className={inputCls}
-                    value={f.room}
-                    onChange={(e) => set("room", e.target.value)}
-                    placeholder="e.g. 204"
-                  />
-                </Field>
-              </div>
+              <Field id="room" label="Room / Unit number" error={errors.room}>
+                <input
+                  {...a("room")}
+                  className={inputCls}
+                  value={f.room}
+                  onChange={(e) => set("room", e.target.value)}
+                  placeholder="e.g. 204 or Ground Floor A-1"
+                />
+              </Field>
 
               <div className="sm:col-span-2">
                 <Field id="instructions" label="Delivery instructions (optional)">
