@@ -583,3 +583,336 @@ describe("4. Component UI Rendering & Verification", () => {
     });
   });
 });
+
+describe("5. RPC Logic Simulation & Guard Rail Verification", () => {
+  interface SimulatedBlock {
+    id: string;
+    name: string;
+    description: string;
+    is_active: boolean;
+  }
+
+  interface SimulatedRole {
+    user_id: string;
+    role: string;
+    assigned_block: string | null;
+  }
+
+  interface SimulatedOrder {
+    id: string;
+    delivery_method: string;
+    delivery_block_id: string | null;
+    status: string;
+    claimed_by: string | null;
+    claimed_at: string | null;
+  }
+
+  // Simulated admin_manage_delivery_block database function
+  function simulateAdminManageDeliveryBlock(
+    callerRole: string | null,
+    action: string,
+    params: {
+      id: string;
+      name?: string | null;
+      description?: string | null;
+      is_active?: boolean | null;
+      manager_user_id?: string | null;
+    },
+    state: {
+      blocks: SimulatedBlock[];
+      roles: SimulatedRole[];
+      orders: SimulatedOrder[];
+    }
+  ): { success: boolean; error?: string } {
+    if (!callerRole || !["super_admin", "owner"].includes(callerRole)) {
+      return { success: false, error: "Access Denied: Only Super Administrators and Store Owners can manage delivery blocks." };
+    }
+
+    const cleanId = (params.id || "").trim();
+    const cleanName = (params.name || cleanId).trim();
+
+    if (!cleanId) {
+      return { success: false, error: "A valid delivery block ID is required." };
+    }
+
+    if (action === "create") {
+      if (state.blocks.some((b) => b.id.toLowerCase() === cleanId.toLowerCase())) {
+        return { success: false, error: `A delivery block with ID "${cleanId}" already exists.` };
+      }
+      if (params.manager_user_id) {
+        const mgr = state.roles.find((r) => r.user_id === params.manager_user_id);
+        if (!mgr || mgr.role !== "block_manager") {
+          return { success: false, error: 'Invalid assignment: Only staff with role "block_manager" can be assigned to a delivery block.' };
+        }
+      }
+      state.blocks.push({
+        id: cleanId,
+        name: cleanName,
+        description: params.description || "",
+        is_active: params.is_active ?? true,
+      });
+      if (params.manager_user_id) {
+        state.roles.forEach((r) => {
+          if (r.assigned_block === cleanId) r.assigned_block = null;
+        });
+        const mgr = state.roles.find((r) => r.user_id === params.manager_user_id);
+        if (mgr) mgr.assigned_block = cleanId;
+      }
+      return { success: true };
+    }
+
+    const block = state.blocks.find((b) => b.id === cleanId);
+    if (!block) {
+      return { success: false, error: `Delivery block "${cleanId}" does not exist.` };
+    }
+
+    if (action === "update") {
+      const willBeInactive = params.is_active === false;
+      if (willBeInactive && block.is_active) {
+        const hasActiveOrders = state.orders.some(
+          (o) => o.delivery_block_id === cleanId && ["placed", "confirmed", "preparing", "out_for_delivery"].includes(o.status)
+        );
+        if (hasActiveOrders) {
+          return { success: false, error: `Cannot deactivate delivery block "${cleanId}": there are active orders currently being fulfilled for this block.` };
+        }
+      }
+
+      block.name = cleanName || block.name;
+      if (params.description !== undefined && params.description !== null) block.description = params.description;
+      if (params.is_active !== undefined && params.is_active !== null) block.is_active = params.is_active;
+
+      if (params.manager_user_id) {
+        const mgr = state.roles.find((r) => r.user_id === params.manager_user_id);
+        if (!mgr || mgr.role !== "block_manager") {
+          return { success: false, error: 'Invalid assignment: Only staff with role "block_manager" can be assigned to a delivery block.' };
+        }
+        state.roles.forEach((r) => {
+          if (r.assigned_block === cleanId) r.assigned_block = null;
+        });
+        mgr.assigned_block = cleanId;
+      }
+      return { success: true };
+    }
+
+    if (action === "toggle_active") {
+      if (block.is_active) {
+        const hasActiveOrders = state.orders.some(
+          (o) => o.delivery_block_id === cleanId && ["placed", "confirmed", "preparing", "out_for_delivery"].includes(o.status)
+        );
+        if (hasActiveOrders) {
+          return { success: false, error: `Cannot deactivate delivery block "${cleanId}": there are active orders currently being fulfilled for this block.` };
+        }
+      }
+      block.is_active = !block.is_active;
+      return { success: true };
+    }
+
+    if (action === "assign_manager") {
+      if (!params.manager_user_id) {
+        state.roles.forEach((r) => {
+          if (r.assigned_block === cleanId) r.assigned_block = null;
+        });
+      } else {
+        const mgr = state.roles.find((r) => r.user_id === params.manager_user_id);
+        if (!mgr || mgr.role !== "block_manager") {
+          return { success: false, error: 'Invalid assignment: Only staff with role "block_manager" can be assigned to a delivery block.' };
+        }
+        state.roles.forEach((r) => {
+          if (r.assigned_block === cleanId) r.assigned_block = null;
+        });
+        mgr.assigned_block = cleanId;
+      }
+      return { success: true };
+    }
+
+    return { success: false, error: `Invalid action: ${action}` };
+  }
+
+  // Simulated admin_claim_order database function
+  function simulateAdminClaimOrder(
+    caller: { id: string; role: string; assigned_block: string | null } | null,
+    orderId: string,
+    orders: SimulatedOrder[]
+  ): { success: boolean; error?: string } {
+    if (!caller) {
+      return { success: false, error: "Authentication required: caller session is unverified." };
+    }
+
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) {
+      return { success: false, error: `Order with ID ${orderId} not found.` };
+    }
+
+    if (["completed", "cancelled"].includes(order.status)) {
+      return { success: false, error: `Cannot claim an order that is already ${order.status}.` };
+    }
+
+    if (order.claimed_by !== null && order.claimed_by !== caller.id) {
+      return { success: false, error: "Concurrency Conflict: This order has already been claimed by another staff member." };
+    }
+
+    if (caller.role === "block_manager") {
+      if (order.delivery_method === "campus_pickup") {
+        return { success: false, error: "Access Denied: Block Managers cannot process Store Pickup orders." };
+      }
+      if (!order.delivery_block_id || order.delivery_block_id !== caller.assigned_block) {
+        return { success: false, error: `Access Denied: You are only authorized to claim orders for delivery block "${caller.assigned_block}".` };
+      }
+    }
+
+    if (caller.role === "store_manager") {
+      if (order.delivery_method !== "campus_pickup") {
+        return { success: false, error: "Access Denied: Store Managers can only claim Store Pickup orders. Block delivery orders are handled by Block Managers and Owners." };
+      }
+    }
+
+    order.claimed_by = caller.id;
+    order.claimed_at = new Date().toISOString();
+    if (order.status === "placed") {
+      order.status = "confirmed";
+    }
+
+    return { success: true };
+  }
+
+  it("admin_manage_delivery_block: validates caller role and rejects unauthorized users", () => {
+    const state = {
+      blocks: [{ id: "Block A", name: "Block A", description: "", is_active: true }],
+      roles: [],
+      orders: [],
+    };
+
+    expect(simulateAdminManageDeliveryBlock(null, "toggle_active", { id: "Block A" }, state).success).toBe(false);
+    expect(simulateAdminManageDeliveryBlock("store_manager", "toggle_active", { id: "Block A" }, state).success).toBe(false);
+    expect(simulateAdminManageDeliveryBlock("block_manager", "toggle_active", { id: "Block A" }, state).success).toBe(false);
+    expect(simulateAdminManageDeliveryBlock("owner", "toggle_active", { id: "Block A" }, state).success).toBe(true);
+    expect(simulateAdminManageDeliveryBlock("super_admin", "toggle_active", { id: "Block A" }, state).success).toBe(true);
+  });
+
+  it("admin_manage_delivery_block: creates block, enforces required fields and duplicate checks", () => {
+    const state = {
+      blocks: [{ id: "Block A", name: "Block A", description: "", is_active: true }],
+      roles: [],
+      orders: [],
+    };
+
+    // Rejects empty ID
+    expect(simulateAdminManageDeliveryBlock("super_admin", "create", { id: "" }, state).error).toContain("required");
+
+    // Rejects duplicate ID
+    expect(simulateAdminManageDeliveryBlock("super_admin", "create", { id: "Block A" }, state).error).toContain("already exists");
+
+    // Successfully creates new block
+    const res = simulateAdminManageDeliveryBlock("super_admin", "create", { id: "Block E", name: "Block E North", description: "Graduate Wing" }, state);
+    expect(res.success).toBe(true);
+    expect(state.blocks.find((b) => b.id === "Block E")).toBeDefined();
+  });
+
+  it("admin_manage_delivery_block: prevents deactivating a block with active orders", () => {
+    const state = {
+      blocks: [{ id: "Block B", name: "Block B", description: "", is_active: true }],
+      roles: [],
+      orders: [
+        { id: "ord-1", delivery_method: "hostel_delivery", delivery_block_id: "Block B", status: "preparing", claimed_by: "u-1", claimed_at: "now" },
+      ],
+    };
+
+    // Attempting toggle_active when active orders exist must fail
+    const toggleRes = simulateAdminManageDeliveryBlock("owner", "toggle_active", { id: "Block B" }, state);
+    expect(toggleRes.success).toBe(false);
+    expect(toggleRes.error).toContain("active orders");
+    expect(state.blocks[0]!.is_active).toBe(true); // remains active
+
+    // Attempting update with is_active: false when active orders exist must fail
+    const updateRes = simulateAdminManageDeliveryBlock("owner", "update", { id: "Block B", is_active: false }, state);
+    expect(updateRes.success).toBe(false);
+    expect(updateRes.error).toContain("active orders");
+
+    // Once orders are completed, deactivation succeeds
+    state.orders[0]!.status = "completed";
+    const successRes = simulateAdminManageDeliveryBlock("owner", "toggle_active", { id: "Block B" }, state);
+    expect(successRes.success).toBe(true);
+    expect(state.blocks[0]!.is_active).toBe(false);
+  });
+
+  it("admin_manage_delivery_block: assigns only verified block_manager and cleans previous assignment", () => {
+    const state = {
+      blocks: [{ id: "Block A", name: "Block A", description: "", is_active: true }],
+      roles: [
+        { user_id: "u-sm", role: "store_manager", assigned_block: null },
+        { user_id: "u-bm1", role: "block_manager", assigned_block: "Block A" },
+        { user_id: "u-bm2", role: "block_manager", assigned_block: null },
+      ],
+      orders: [],
+    };
+
+    // Rejects non-block-manager role
+    const invalidRes = simulateAdminManageDeliveryBlock("owner", "assign_manager", { id: "Block A", manager_user_id: "u-sm" }, state);
+    expect(invalidRes.success).toBe(false);
+    expect(invalidRes.error).toContain("block_manager");
+
+    // Assigns bm2 and clears bm1
+    const assignRes = simulateAdminManageDeliveryBlock("owner", "assign_manager", { id: "Block A", manager_user_id: "u-bm2" }, state);
+    expect(assignRes.success).toBe(true);
+    expect(state.roles.find((r) => r.user_id === "u-bm2")?.assigned_block).toBe("Block A");
+    expect(state.roles.find((r) => r.user_id === "u-bm1")?.assigned_block).toBeNull();
+  });
+
+  it("admin_claim_order: restricts Block Managers strictly to their assigned block", () => {
+    const orders: SimulatedOrder[] = [
+      { id: "ord-a", delivery_method: "hostel_delivery", delivery_block_id: "Block A", status: "placed", claimed_by: null, claimed_at: null },
+      { id: "ord-b", delivery_method: "hostel_delivery", delivery_block_id: "Block B", status: "placed", claimed_by: null, claimed_at: null },
+      { id: "ord-pickup", delivery_method: "campus_pickup", delivery_block_id: null, status: "placed", claimed_by: null, claimed_at: null },
+    ];
+    const blockManagerA = { id: "mgr-a", role: "block_manager", assigned_block: "Block A" };
+
+    // Allowed on Block A
+    expect(simulateAdminClaimOrder(blockManagerA, "ord-a", orders).success).toBe(true);
+
+    // Rejected on Block B
+    const bRes = simulateAdminClaimOrder(blockManagerA, "ord-b", orders);
+    expect(bRes.success).toBe(false);
+    expect(bRes.error).toContain("Block A");
+
+    // Rejected on Store Pickup
+    const pickupRes = simulateAdminClaimOrder(blockManagerA, "ord-pickup", orders);
+    expect(pickupRes.success).toBe(false);
+    expect(pickupRes.error).toContain("Store Pickup");
+  });
+
+  it("admin_claim_order: restricts Store Managers strictly to Store Pickup orders", () => {
+    const orders: SimulatedOrder[] = [
+      { id: "ord-block", delivery_method: "hostel_delivery", delivery_block_id: "Block A", status: "placed", claimed_by: null, claimed_at: null },
+      { id: "ord-pickup", delivery_method: "campus_pickup", delivery_block_id: null, status: "placed", claimed_by: null, claimed_at: null },
+    ];
+    const storeManager = { id: "sm-1", role: "store_manager", assigned_block: null };
+
+    // Rejected on hostel delivery
+    const blockRes = simulateAdminClaimOrder(storeManager, "ord-block", orders);
+    expect(blockRes.success).toBe(false);
+    expect(blockRes.error).toContain("Store Managers can only claim Store Pickup orders");
+
+    // Allowed on store pickup
+    const pickupRes = simulateAdminClaimOrder(storeManager, "ord-pickup", orders);
+    expect(pickupRes.success).toBe(true);
+    expect(orders.find((o) => o.id === "ord-pickup")?.claimed_by).toBe("sm-1");
+  });
+
+  it("admin_claim_order: rejects terminal orders and concurrent claims", () => {
+    const orders: SimulatedOrder[] = [
+      { id: "ord-completed", delivery_method: "hostel_delivery", delivery_block_id: "Block A", status: "completed", claimed_by: "u-1", claimed_at: "now" },
+      { id: "ord-claimed", delivery_method: "hostel_delivery", delivery_block_id: "Block A", status: "confirmed", claimed_by: "u-1", claimed_at: "now" },
+    ];
+    const superAdmin = { id: "sa-1", role: "super_admin", assigned_block: null };
+
+    // Rejects completed order
+    const compRes = simulateAdminClaimOrder(superAdmin, "ord-completed", orders);
+    expect(compRes.success).toBe(false);
+    expect(compRes.error).toContain("already completed");
+
+    // Rejects order already claimed by another user
+    const claimRes = simulateAdminClaimOrder(superAdmin, "ord-claimed", orders);
+    expect(claimRes.success).toBe(false);
+    expect(claimRes.error).toContain("Concurrency Conflict");
+  });
+});
