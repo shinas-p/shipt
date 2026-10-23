@@ -498,7 +498,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchCustomerOrders = async (): Promise<CustomerOrderSummary[]> => {
     if (!user || !isSupabaseConfigured) return [];
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("orders")
         .select(`
           id,
@@ -541,8 +541,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
+      // Fallback if delivery_block_id does not yet exist in schema cache
+      if (error && (error.code === "42703" || error.message?.includes("does not exist"))) {
+        const fallback = await supabase
+          .from("orders")
+          .select(`
+            id,
+            order_number,
+            status,
+            total_amount,
+            subtotal,
+            delivery_fee,
+            discount_amount,
+            delivery_method,
+            hostel,
+            block,
+            room,
+            pickup_location,
+            delivery_instructions,
+            payment_method,
+            payment_status,
+            created_at,
+            order_items (
+              id,
+              product_id,
+              product_name,
+              product_size,
+              unit_price,
+              quantity,
+              total_price,
+              products (
+                image_url
+              )
+            ),
+            order_status_history (
+              id,
+              previous_status,
+              new_status,
+              notes,
+              created_at
+            )
+          `)
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+        data = fallback.data as any;
+        error = fallback.error;
+      }
+
       if (error || !data) return [];
-      return data as unknown as CustomerOrderSummary[];
+      return (data as unknown[]).map((raw: any) => ({
+        ...raw,
+        delivery_block_id: raw.delivery_block_id ?? null,
+      })) as CustomerOrderSummary[];
     } catch {
       return [];
     }

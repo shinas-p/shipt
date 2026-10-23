@@ -31,6 +31,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 function createChainableMock(resolvedValue: any = { data: [], error: null }) {
+  const promise = Promise.resolve(resolvedValue);
   const chain: any = {
     select: vi.fn(() => chain),
     insert: vi.fn(() => chain),
@@ -43,8 +44,8 @@ function createChainableMock(resolvedValue: any = { data: [], error: null }) {
     limit: vi.fn(() => chain),
     single: vi.fn(() => Promise.resolve(resolvedValue)),
     maybeSingle: vi.fn(() => Promise.resolve(resolvedValue)),
-    then: (resolve: any) => Promise.resolve(resolvedValue).then(resolve),
-    catch: (reject: any) => Promise.resolve(resolvedValue).catch(reject),
+    then: promise.then.bind(promise),
+    catch: promise.catch.bind(promise),
   };
   return chain;
 }
@@ -118,16 +119,19 @@ vi.mock("@/lib/store", () => ({
   }),
 }));
 
+const mockCustomerUser = { id: "cust-1", email: "customer@shiptmart.com" };
+const mockCustomerProfile = {
+  full_name: "Salman Faris",
+  phone: "9876543210",
+  default_block: "Block A",
+  default_room: "302",
+  default_hostel: "Block A",
+};
+
 vi.mock("@/lib/auth", () => ({
   useCustomerAuth: () => ({
-    user: { id: "cust-1", email: "customer@shiptmart.com" },
-    profile: {
-      full_name: "Salman Faris",
-      phone: "9876543210",
-      default_block: "Block A",
-      default_room: "302",
-      default_hostel: "Block A",
-    },
+    user: mockCustomerUser,
+    profile: mockCustomerProfile,
   }),
 }));
 
@@ -155,6 +159,11 @@ vi.mock("@/lib/catalogApi", () => ({
 }));
 
 describe("1. Role Permission Hierarchy & Order Access Scope", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.clearAllMocks();
+  });
+
   it("enforces Super Admin full authorization across all domains", () => {
     expect(hasPermission("super_admin", "manage_roles")).toBe(true);
     expect(hasPermission("super_admin", "manage_delivery_blocks")).toBe(true);
@@ -553,8 +562,8 @@ describe("4. Component UI Rendering & Verification", () => {
     expect(screen.getByText("Add Delivery Block")).toBeDefined();
 
     await waitFor(() => {
-      expect(screen.getByText("Block A")).toBeDefined();
-      expect(screen.getByText("Block B")).toBeDefined();
+      expect(screen.getAllByText("Block A").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Block B").length).toBeGreaterThan(0);
     });
   });
 
@@ -564,13 +573,12 @@ describe("4. Component UI Rendering & Verification", () => {
   });
 
   it("renders CheckoutForm with dynamic delivery blocks and preselects customer default block", async () => {
+    sessionStorage.clear();
     render(<CheckoutForm />);
 
     await waitFor(() => {
-      // Dynamic delivery block selector is rendered
       const select = screen.getByLabelText("Delivery Block") as HTMLSelectElement;
       expect(select).toBeDefined();
-      // Preselected from profile default_block: "Block A"
       expect(select.value).toBe("Block A");
     });
   });

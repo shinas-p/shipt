@@ -28,7 +28,7 @@ const PICKUP_LOCATIONS = [
   "Main Express Counter",
 ];
 
-type Errors = Partial<Record<keyof CheckoutFormData, string>>;
+type Errors = Partial<Record<keyof CheckoutFormData, string | undefined>>;
 
 function validate(f: CheckoutFormData): Errors {
   const e: Errors = {};
@@ -38,7 +38,7 @@ function validate(f: CheckoutFormData): Errors {
 
   if (f.deliveryMethod === "hostel_delivery") {
     if (!f.deliveryBlockId && !f.block) e.deliveryBlockId = "Please select your delivery block.";
-    if (!f.room.trim()) e.room = "Enter your room or unit number.";
+    if (!f.room?.trim()) e.room = "Enter your room or unit number.";
   } else {
     if (!f.pickupLocation) e.pickupLocation = "Select a pickup location.";
   }
@@ -111,15 +111,35 @@ export function CheckoutForm() {
   // Pre-fill fields from customer profile if user is logged in
   useEffect(() => {
     if (profile) {
-      setF((prev) => ({
-        ...prev,
-        name: prev.name || profile.full_name || "",
-        phone: prev.phone || profile.phone || "",
-        deliveryBlockId: prev.deliveryBlockId || profile.default_block || "",
-        hostel: prev.hostel || profile.default_hostel || profile.default_block || "",
-        block: prev.block || profile.default_block || "",
-        room: prev.room || profile.default_room || "",
-      }));
+      setF((prev) => {
+        const nextName = prev.name || profile.full_name || "";
+        const nextPhone = prev.phone || profile.phone || "";
+        const nextDeliveryBlockId = prev.deliveryBlockId || profile.default_block || "";
+        const nextHostel = prev.hostel || profile.default_hostel || profile.default_block || "";
+        const nextBlock = prev.block || profile.default_block || "";
+        const nextRoom = prev.room || profile.default_room || "";
+
+        if (
+          prev.name === nextName &&
+          prev.phone === nextPhone &&
+          prev.deliveryBlockId === nextDeliveryBlockId &&
+          prev.hostel === nextHostel &&
+          prev.block === nextBlock &&
+          prev.room === nextRoom
+        ) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          name: nextName,
+          phone: nextPhone,
+          deliveryBlockId: nextDeliveryBlockId,
+          hostel: nextHostel,
+          block: nextBlock,
+          room: nextRoom,
+        };
+      });
     }
   }, [profile]);
 

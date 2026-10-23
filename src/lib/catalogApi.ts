@@ -205,7 +205,7 @@ export async function placeOrder(
     delivery_block_id: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
     hostel: form.deliveryMethod === "hostel_delivery" ? (form.hostel || selectedBlock) : null,
     block: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
-    room: form.deliveryMethod === "hostel_delivery" ? form.room.trim() : null,
+    room: form.deliveryMethod === "hostel_delivery" ? (form.room?.trim() || null) : null,
     pickup_location: form.deliveryMethod === "campus_pickup" ? form.pickupLocation : null,
     delivery_instructions: form.instructions?.trim() || null,
     payment_method: form.payment,

@@ -38,6 +38,9 @@ interface BrandingContextType {
 
 const BrandingContext = createContext<BrandingContextType | null>(null);
 
+// Session cache to prevent repetitive 404 queries when store_settings table is not yet in Supabase schema cache
+let isStoreSettingsAvailable: boolean | null = null;
+
 export function BrandingProvider({ children }: { children: ReactNode }) {
   // 1. Initialize from cache or default branding
   const [branding, setBranding] = useState<StoreBranding>(() => {
@@ -68,7 +71,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
 
   // 2. Fetch fresh branding from Supabase
   const refreshBranding = useCallback(async () => {
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || isStoreSettingsAvailable === false) {
       setIsLoading(false);
       return;
     }
@@ -82,12 +85,23 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (fetchErr) {
-        // If table doesn't exist yet or permission denied, keep sensible default
-        if (!fetchErr.message.includes("does not exist") && !fetchErr.message.includes("relation")) {
+        // If table doesn't exist yet (PGRST205, 42P01, schema cache, does not exist, relation)
+        const isMissingTable =
+          fetchErr.code === "PGRST205" ||
+          fetchErr.code === "42P01" ||
+          fetchErr.message?.includes("schema cache") ||
+          fetchErr.message?.includes("does not exist") ||
+          fetchErr.message?.includes("relation");
+
+        if (isMissingTable) {
+          isStoreSettingsAvailable = false;
+        } else {
           setError(fetchErr.message);
         }
         return;
       }
+
+      isStoreSettingsAvailable = true;
 
       if (data) {
         const fresh: StoreBranding = {
@@ -187,9 +201,23 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
         );
 
         if (dbError) {
+          const isMissingTable =
+            dbError.code === "PGRST205" ||
+            dbError.code === "42P01" ||
+            dbError.message?.includes("schema cache") ||
+            dbError.message?.includes("does not exist") ||
+            dbError.message?.includes("relation");
+
+          if (isMissingTable) {
+            isStoreSettingsAvailable = false;
+            return {
+              success: true,
+            };
+          }
           setError(dbError.message);
           return { success: false, error: dbError.message };
         }
+        isStoreSettingsAvailable = true;
       }
 
       return { success: true };

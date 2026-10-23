@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ShieldCheck,
   Package,
@@ -22,6 +22,7 @@ import {
   Edit3,
   Users,
   UserPlus,
+  UserCheck,
   UserX,
   ExternalLink,
   Tag,
@@ -83,6 +84,40 @@ export const Route = createFileRoute("/admin")({
     ],
   }),
   component: AdminPage,
+  errorComponent: ({ error, reset }: { error: any; reset: () => void }) => (
+    <div className="container-page py-12 flex justify-center">
+      <div className="w-full max-w-lg rounded-3xl border border-destructive/30 bg-card p-6 shadow-soft sm:p-8 text-center space-y-4">
+        <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+          <AlertCircle className="size-7" />
+        </div>
+        <h2 className="font-display text-xl font-bold tracking-tight text-foreground">
+          Admin Portal Error
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          {error?.message || "Something went wrong while loading the admin portal."}
+        </p>
+        <div className="pt-2 flex flex-wrap justify-center gap-3">
+          <Button
+            variant="hero"
+            size="sm"
+            onClick={() => reset()}
+            className="font-bold text-xs"
+          >
+            <RefreshCw className="mr-1.5 size-3.5" />
+            Try Again
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            asChild
+            className="text-xs font-semibold"
+          >
+            <Link to="/">Back to Storefront</Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  ),
 });
 
 interface AdminOrderItem {
@@ -195,7 +230,7 @@ interface AdminRoleUser {
   created_at: string;
 }
 
-export function AdminPage() {
+function AdminPortalInner() {
   const { refreshCatalog } = useStore();
   const { branding } = useBranding();
   const [session, setSession] = useState<any>(null);
@@ -313,6 +348,63 @@ export function AdminPage() {
     role: AdminRole;
     assignedBlock?: string | null;
   } | null>(null);
+
+  // Top-level unconditionally declared hooks (guarantees uniform hook count on every render)
+  const scopedOrders = useMemo(() => {
+    return orders.filter((o) => {
+      // Store Manager: Strictly limited to Store Pickup orders
+      if (adminRole === "store_manager") {
+        return o.delivery_method === "campus_pickup";
+      }
+      // Block Manager: Strictly limited to assigned delivery block
+      if (adminRole === "block_manager") {
+        if (o.delivery_method === "campus_pickup") return false;
+        const b = o.delivery_block_id || o.block;
+        return Boolean(assignedBlock && b && assignedBlock.toLowerCase() === b.toLowerCase());
+      }
+      // Super Admin and Owner: View all orders across all blocks
+      return true;
+    });
+  }, [orders, adminRole, assignedBlock]);
+
+  const filteredOrders = useMemo(() => {
+    return scopedOrders.filter((o) => {
+      if (orderFilter !== "all" && o.status !== orderFilter) return false;
+      if (orderBlockFilter !== "all") {
+        if (orderBlockFilter === "campus_pickup") {
+          if (o.delivery_method !== "campus_pickup") return false;
+        } else {
+          const b = o.delivery_block_id || o.block;
+          if (b !== orderBlockFilter) return false;
+        }
+      }
+      return true;
+    });
+  }, [scopedOrders, orderFilter, orderBlockFilter]);
+
+  const filteredProducts = useMemo(() => {
+    return dbProducts.filter((p) => {
+      if (productCategoryFilter !== "all" && p.category_id !== productCategoryFilter) return false;
+      if (productStockFilter === "out_of_stock" && p.stock !== 0) return false;
+      if (productStockFilter === "low_stock" && (p.stock === 0 || p.stock > 5)) return false;
+      if (productStockFilter === "in_stock" && p.stock === 0) return false;
+      if (productSearch.trim()) {
+        const q = productSearch.toLowerCase();
+        return p.name.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q));
+      }
+      return true;
+    });
+  }, [dbProducts, productCategoryFilter, productStockFilter, productSearch]);
+
+  const { lowStockCount, outOfStockCount } = useMemo(() => {
+    let low = 0;
+    let out = 0;
+    for (const p of dbProducts) {
+      if (p.stock === 0) out++;
+      else if (p.stock <= 5) low++;
+    }
+    return { lowStockCount: low, outOfStockCount: out };
+  }, [dbProducts]);
 
   // Check auth and admin permissions
   const checkAuth = useCallback(async () => {
@@ -442,7 +534,7 @@ export function AdminPage() {
   const loadOrders = useCallback(async () => {
     setOrdersLoading(true);
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("orders")
         .select(`
           id,
@@ -491,8 +583,64 @@ export function AdminPage() {
         `)
         .order("created_at", { ascending: false });
 
+      // Resilient fallback query if unapplied block-delivery columns do not exist yet on production orders table (code 42703 / column not found)
+      if (error && (error.code === "42703" || error.message?.includes("does not exist"))) {
+        const fallback = await supabase
+          .from("orders")
+          .select(`
+            id,
+            order_number,
+            user_id,
+            customer_name,
+            customer_phone,
+            delivery_method,
+            hostel,
+            block,
+            room,
+            pickup_location,
+            delivery_instructions,
+            status,
+            subtotal,
+            delivery_fee,
+            discount_amount,
+            total_amount,
+            payment_method,
+            payment_status,
+            created_at,
+            updated_at,
+            order_items(
+              id,
+              product_id,
+              product_name,
+              product_size,
+              unit_price,
+              quantity,
+              total_price,
+              products(image_url)
+            ),
+            order_status_history(
+              id,
+              previous_status,
+              new_status,
+              notes,
+              created_at
+            )
+          `)
+          .order("created_at", { ascending: false });
+        data = fallback.data as any;
+        error = fallback.error;
+      }
+
       if (!error && data) {
-        const typedOrders = data as unknown as AdminOrder[];
+        const typedOrders = (data as unknown[]).map((raw: any) => ({
+          ...raw,
+          delivery_block_id: raw.delivery_block_id ?? null,
+          claimed_by: raw.claimed_by ?? null,
+          claimed_at: raw.claimed_at ?? null,
+          processing_started_at: raw.processing_started_at ?? null,
+          completed_at: raw.completed_at ?? null,
+          cancelled_at: raw.cancelled_at ?? null,
+        })) as AdminOrder[];
         setOrders(typedOrders);
         return typedOrders;
       }
@@ -804,7 +952,9 @@ export function AdminPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (typeof supabase.removeChannel === "function") {
+        supabase.removeChannel(channel);
+      }
     };
   }, [isAdmin, loadOrders]);
 
@@ -1503,56 +1653,6 @@ export function AdminPage() {
       </div>
     );
   }
-
-  // Scoped orders enforcing role boundaries
-  const scopedOrders = useMemo(() => {
-    return orders.filter((o) => {
-      // Store Manager: Strictly limited to Store Pickup orders
-      if (adminRole === "store_manager") {
-        return o.delivery_method === "campus_pickup";
-      }
-      // Block Manager: Strictly limited to assigned delivery block
-      if (adminRole === "block_manager") {
-        if (o.delivery_method === "campus_pickup") return false;
-        const b = o.delivery_block_id || o.block;
-        return Boolean(assignedBlock && b && assignedBlock.toLowerCase() === b.toLowerCase());
-      }
-      // Super Admin and Owner: View all orders across all blocks
-      return true;
-    });
-  }, [orders, adminRole, assignedBlock]);
-
-  // Filtered orders applying status and block filters
-  const filteredOrders = useMemo(() => {
-    return scopedOrders.filter((o) => {
-      if (orderFilter !== "all" && o.status !== orderFilter) return false;
-      if (orderBlockFilter !== "all") {
-        if (orderBlockFilter === "campus_pickup") {
-          if (o.delivery_method !== "campus_pickup") return false;
-        } else {
-          const b = o.delivery_block_id || o.block;
-          if (b !== orderBlockFilter) return false;
-        }
-      }
-      return true;
-    });
-  }, [scopedOrders, orderFilter, orderBlockFilter]);
-
-  // Filtered products
-  const filteredProducts = dbProducts.filter((p) => {
-    if (productCategoryFilter !== "all" && p.category_id !== productCategoryFilter) return false;
-    if (productStockFilter === "out_of_stock" && p.stock !== 0) return false;
-    if (productStockFilter === "low_stock" && (p.stock === 0 || p.stock > 5)) return false;
-    if (productStockFilter === "in_stock" && p.stock === 0) return false;
-    if (productSearch.trim()) {
-      const q = productSearch.toLowerCase();
-      return p.name.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q));
-    }
-    return true;
-  });
-
-  const lowStockCount = dbProducts.filter((p) => p.stock > 0 && p.stock <= 5).length;
-  const outOfStockCount = dbProducts.filter((p) => p.stock === 0).length;
 
   return (
     <div className="container-page py-6 md:py-10">
@@ -3160,5 +3260,80 @@ export function AdminPage() {
         <BlockManagementTab adminRole={adminRole} />
       )}
     </div>
+  );
+}
+
+interface AdminErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface AdminErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class AdminErrorBoundary extends React.Component<AdminErrorBoundaryProps, AdminErrorBoundaryState> {
+  constructor(props: AdminErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): AdminErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  override componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("AdminErrorBoundary caught rendering error:", error, errorInfo);
+  }
+
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <div className="container-page py-12 flex justify-center">
+          <div className="w-full max-w-lg rounded-3xl border border-destructive/30 bg-card p-6 shadow-soft sm:p-8 text-center space-y-4">
+            <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+              <AlertCircle className="size-7" />
+            </div>
+            <h2 className="font-display text-xl font-bold tracking-tight text-foreground">
+              Admin Interface Encountered an Issue
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {this.state.error?.message || "An unexpected rendering issue occurred in the admin dashboard."}
+            </p>
+            <div className="pt-2 flex flex-wrap justify-center gap-3">
+              <Button
+                variant="hero"
+                size="sm"
+                onClick={() => {
+                  this.setState({ hasError: false, error: null });
+                  window.location.reload();
+                }}
+                className="font-bold text-xs"
+              >
+                <RefreshCw className="mr-1.5 size-3.5" />
+                Reload Portal
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                className="text-xs font-semibold"
+              >
+                <Link to="/">Back to Storefront</Link>
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export function AdminPage() {
+  return (
+    <AdminErrorBoundary>
+      <AdminPortalInner />
+    </AdminErrorBoundary>
   );
 }

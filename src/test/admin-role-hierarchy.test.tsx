@@ -167,7 +167,8 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
       const allPermissions: AdminPermission[] = [
         "manage_roles",
         "manage_security_settings",
-        "manage_block_assignments",
+        "manage_delivery_blocks",
+        "assign_block_managers",
         "manage_products",
         "manage_categories",
         "manage_inventory",
@@ -175,7 +176,9 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
         "manage_branding",
         "view_all_orders",
         "view_assigned_block_orders",
+        "view_pickup_orders",
         "update_order_status",
+        "claim_orders",
         "manage_supplier_costs",
         "view_profitability_reports",
         "view_business_reports",
@@ -197,6 +200,8 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
 
     it("Owner possesses business authority, private costs and all orders, but is DENIED role admin and audit logs", () => {
       // Allowed permissions
+      expect(hasPermission("owner", "manage_delivery_blocks")).toBe(true);
+      expect(hasPermission("owner", "assign_block_managers")).toBe(true);
       expect(hasPermission("owner", "manage_products")).toBe(true);
       expect(hasPermission("owner", "manage_categories")).toBe(true);
       expect(hasPermission("owner", "manage_inventory")).toBe(true);
@@ -210,7 +215,6 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
       // Strictly Denied permissions
       expect(hasPermission("owner", "manage_roles")).toBe(false);
       expect(hasPermission("owner", "manage_security_settings")).toBe(false);
-      expect(hasPermission("owner", "manage_block_assignments")).toBe(false);
       expect(hasPermission("owner", "view_audit_logs")).toBe(false);
       expect(canManageRoles("owner")).toBe(false);
       expect(canViewAuditLogs("owner")).toBe(false);
@@ -221,11 +225,14 @@ describe("Shipt Mart — Secure Admin Role Hierarchy Suite", () => {
       expect(hasPermission("store_manager", "manage_products")).toBe(true);
       expect(hasPermission("store_manager", "manage_categories")).toBe(true);
       expect(hasPermission("store_manager", "manage_inventory")).toBe(true);
-      expect(hasPermission("store_manager", "view_all_orders")).toBe(true);
+      expect(hasPermission("store_manager", "view_pickup_orders")).toBe(true);
       expect(hasPermission("store_manager", "update_order_status")).toBe(true);
       expect(hasPermission("store_manager", "view_operational_reports")).toBe(true);
 
       // Strictly Denied
+      expect(hasPermission("store_manager", "view_all_orders")).toBe(false);
+      expect(hasPermission("store_manager", "manage_delivery_blocks")).toBe(false);
+      expect(hasPermission("store_manager", "assign_block_managers")).toBe(false);
       expect(hasPermission("store_manager", "manage_supplier_costs")).toBe(false);
       expect(hasPermission("store_manager", "view_profitability_reports")).toBe(false);
       expect(hasPermission("store_manager", "view_business_reports")).toBe(false);
