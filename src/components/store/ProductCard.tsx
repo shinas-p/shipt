@@ -36,7 +36,7 @@ export function ProductCard({ product: p }: { product: Product }) {
       <Link
         to="/product/$productId"
         params={{ productId: p.id }}
-        className="relative block aspect-square overflow-hidden bg-muted cursor-pointer"
+        className="relative block aspect-square w-full overflow-hidden bg-muted cursor-pointer"
         aria-label={`View ${p.name}`}
       >
         <img
@@ -45,18 +45,18 @@ export function ProductCard({ product: p }: { product: Product }) {
           loading="lazy"
           width={816}
           height={816}
-          className={cn("size-full object-cover transition duration-500 group-hover:scale-105", out && "opacity-50 grayscale")}
+          className={cn("h-full w-full object-cover transition duration-500 group-hover:scale-105", out && "opacity-50 grayscale")}
           onError={(e) => {
             e.currentTarget.src = BRAND_FALLBACK_IMAGE;
           }}
         />
-        <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
+        <div className="absolute left-2 top-2 z-10 flex flex-col items-start gap-1 pointer-events-none">
           {p.bestseller && <span className="rounded-full bg-forest px-2 py-0.5 text-[11px] font-semibold text-forest-foreground">Bestseller</span>}
           {discount > 0 && <span className="rounded-full bg-lime px-2 py-0.5 text-[11px] font-bold text-lime-foreground">{discount}% off*</span>}
         </div>
-        {out && <span className="absolute inset-x-0 bottom-3 mx-auto w-fit rounded-full bg-foreground/85 px-3 py-1 text-xs font-semibold text-background">Out of stock</span>}
+        {out && <span className="absolute inset-x-0 bottom-3 z-10 mx-auto w-fit rounded-full bg-foreground/85 px-3 py-1 text-xs font-semibold text-background">Out of stock</span>}
       </Link>
-      <button type="button" onClick={() => toggleWish(p)} aria-pressed={wished} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} className="absolute right-2 top-2 grid size-9 place-items-center rounded-full bg-card/90 shadow-soft backdrop-blur transition hover:scale-110">
+      <button type="button" onClick={() => toggleWish(p)} aria-pressed={wished} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} className="absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full bg-card/90 shadow-soft backdrop-blur transition hover:scale-110">
         <Heart className={cn("size-4", wished ? "fill-destructive text-destructive" : "text-foreground")} />
       </button>
       <div className="flex flex-1 flex-col gap-1 p-3 sm:p-4">

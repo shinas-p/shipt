@@ -29,7 +29,8 @@ export type AdminPermission =
   | "view_profitability_reports"
   | "view_business_reports"
   | "view_operational_reports"
-  | "view_audit_logs";
+  | "view_audit_logs"
+  | "manage_maintenance";
 
 export interface RoleMetadata {
   id: AdminRole;
@@ -94,6 +95,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> =
     "view_business_reports",
     "view_operational_reports",
     "view_audit_logs",
+    "manage_maintenance",
   ]),
   owner: new Set<AdminPermission>([
     "manage_delivery_blocks",
@@ -167,6 +169,10 @@ export function canManageBanners(role: AdminRole | null | undefined): boolean {
 
 export function canManageBranding(role: AdminRole | null | undefined): boolean {
   return hasPermission(role, "manage_branding");
+}
+
+export function canManageMaintenance(role: AdminRole | null | undefined): boolean {
+  return hasPermission(role, "manage_maintenance");
 }
 
 export function canViewAllOrders(role: AdminRole | null | undefined): boolean {

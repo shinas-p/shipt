@@ -227,19 +227,19 @@ function ProductDetailPage() {
         {/* Left Column: Large Product Image Stage */}
         <div className="lg:col-span-6">
           <div className="sticky top-20">
-            <div className="relative aspect-square w-full overflow-hidden rounded-3xl border border-border bg-gradient-to-b from-[#F7F8F4] to-[#EAECE4] p-4 shadow-soft sm:p-6 flex items-center justify-center">
+            <div className="relative aspect-square w-full overflow-hidden rounded-3xl border border-border bg-muted shadow-soft">
               <img
                 src={imageError ? BRAND_FALLBACK_IMAGE : product.image}
                 alt={product.name}
                 className={cn(
-                  "size-full max-h-[500px] object-contain transition duration-500 hover:scale-105",
+                  "h-full w-full object-cover transition duration-500 hover:scale-105",
                   outOfStock && "opacity-50 grayscale"
                 )}
                 onError={() => setImageError(true)}
               />
 
               {/* Badges on Image */}
-              <div className="absolute left-4 top-4 flex flex-col items-start gap-1.5">
+              <div className="absolute left-4 top-4 z-10 flex flex-col items-start gap-1.5 pointer-events-none">
                 {product.bestseller && (
                   <span className="rounded-full bg-forest px-3 py-1 text-xs font-bold text-forest-foreground shadow-xs">
                     Bestseller
@@ -263,7 +263,7 @@ function ProductDetailPage() {
                 onClick={() => toggleWish(product)}
                 aria-pressed={isWished}
                 aria-label={isWished ? "Remove from wishlist" : "Add to wishlist"}
-                className="absolute right-4 top-4 grid size-11 place-items-center rounded-full bg-card/95 shadow-soft backdrop-blur transition hover:scale-110 border border-border/80"
+                className="absolute right-4 top-4 z-10 grid size-11 place-items-center rounded-full bg-card/95 shadow-soft backdrop-blur transition hover:scale-110 border border-border/80"
               >
                 <Heart
                   className={cn(
@@ -274,7 +274,7 @@ function ProductDetailPage() {
               </button>
 
               {outOfStock && (
-                <div className="absolute inset-0 grid place-items-center bg-background/60 backdrop-blur-xs">
+                <div className="absolute inset-0 z-20 grid place-items-center bg-background/60 backdrop-blur-xs">
                   <span className="rounded-2xl border border-destructive/30 bg-destructive px-5 py-2 text-sm font-extrabold text-destructive-foreground shadow-lg">
                     Out of Stock
                   </span>

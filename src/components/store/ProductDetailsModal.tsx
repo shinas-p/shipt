@@ -22,11 +22,11 @@ export function ProductDetailsModal() {
     <Dialog open={!!p} onOpenChange={(o) => !o && setDetail(null)}>
       <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-3xl p-0 sm:rounded-3xl">
         <div className="grid sm:grid-cols-2">
-          <div className="aspect-square bg-muted">
+          <div className="relative aspect-square w-full overflow-hidden bg-muted">
             <img
               src={p.image}
               alt={p.name}
-              className={cn("size-full object-cover", out && "grayscale opacity-60")}
+              className={cn("h-full w-full object-cover transition duration-500", out && "grayscale opacity-60")}
               onError={(e) => {
                 e.currentTarget.src = BRAND_FALLBACK_IMAGE;
               }}

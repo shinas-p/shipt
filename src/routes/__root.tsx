@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useLocation,
   HeadContent,
   Scripts,
   type ErrorComponentProps,
@@ -14,12 +15,14 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth";
 import { BrandingProvider } from "@/lib/branding";
+import { MaintenanceProvider, useMaintenance } from "@/lib/maintenance";
 import { StoreProvider } from "@/lib/store";
 import { Header } from "@/components/store/Header";
 import { Footer } from "@/components/store/Footer";
 import { CartDrawer } from "@/components/store/CartDrawer";
 import { ProductDetailsModal } from "@/components/store/ProductDetailsModal";
 import { OpeningLogoAnimation } from "@/components/store/OpeningLogoAnimation";
+import { MaintenanceView } from "@/components/store/MaintenanceView";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -126,6 +129,40 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function RootComponentContent() {
+  const { isMaintenanceMode } = useMaintenance();
+  const location = useLocation();
+
+  const isBypassedRoute =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/accept-invitation") ||
+    location.pathname.startsWith("/auth.callback") ||
+    location.pathname.startsWith("/account");
+
+  if (isMaintenanceMode && !isBypassedRoute) {
+    return (
+      <>
+        <MaintenanceView />
+        <Toaster position="top-center" richColors />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <OpeningLogoAnimation />
+      <Header />
+      <main className="overflow-x-hidden">
+        <Outlet />
+      </main>
+      <Footer />
+      <CartDrawer />
+      <ProductDetailsModal />
+      <Toaster position="top-center" richColors />
+    </>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
@@ -133,17 +170,11 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrandingProvider>
-          <StoreProvider>
-            <OpeningLogoAnimation />
-            <Header />
-            <main className="overflow-x-hidden">
-              <Outlet />
-            </main>
-            <Footer />
-            <CartDrawer />
-            <ProductDetailsModal />
-            <Toaster position="top-center" richColors />
-          </StoreProvider>
+          <MaintenanceProvider>
+            <StoreProvider>
+              <RootComponentContent />
+            </StoreProvider>
+          </MaintenanceProvider>
         </BrandingProvider>
       </AuthProvider>
     </QueryClientProvider>

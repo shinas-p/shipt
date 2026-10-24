@@ -61,6 +61,8 @@ import { SmartDashboard } from "@/components/admin/SmartDashboard";
 import { ProductManagementCenter } from "@/components/admin/products/ProductManagementCenter";
 import { StoreBrandingTab } from "@/components/admin/StoreBrandingTab";
 import { BlockManagementTab } from "@/components/admin/BlockManagementTab";
+import { MaintenanceModeTab } from "@/components/admin/MaintenanceModeTab";
+import { useMaintenance } from "@/lib/maintenance";
 import type { DBCategory } from "@/components/admin/products/types";
 import {
   AdminRole,
@@ -69,6 +71,7 @@ import {
   canManageRoles,
   canManageBlocks,
   canManageBranding,
+  canManageMaintenance,
   canViewAllOrders,
   canViewAuditLogs,
   canAccessOrder,
@@ -233,6 +236,7 @@ interface AdminRoleUser {
 function AdminPortalInner() {
   const { refreshCatalog } = useStore();
   const { branding } = useBranding();
+  const { isMaintenanceMode } = useMaintenance();
   const [session, setSession] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
@@ -256,8 +260,8 @@ function AdminPortalInner() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'blocks' | 'branding'
-  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding">("dashboard");
+  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'blocks' | 'branding' | 'maintenance'
+  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding" | "maintenance">("dashboard");
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -1829,6 +1833,26 @@ function AdminPortalInner() {
             <span>Store Branding</span>
           </button>
         )}
+
+        {/* Super Admin: Maintenance Mode */}
+        {canManageMaintenance(adminRole) && (
+          <button
+            type="button"
+            onClick={() => setActiveTab("maintenance")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+              activeTab === "maintenance"
+                ? "bg-amber-600 text-white shadow-sm dark:bg-amber-500"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
+          >
+            <ShieldAlert className="size-4" />
+            <span>Maintenance Mode</span>
+            {isMaintenanceMode && (
+              <span className="size-2 rounded-full bg-amber-400 animate-ping ml-0.5" />
+            )}
+          </button>
+        )}
       </div>
 
       {/* TAB 0: SMART DASHBOARD OVERVIEW */}
@@ -3258,6 +3282,13 @@ function AdminPortalInner() {
       {/* TAB 6: DELIVERY BLOCKS ARCHITECTURE (Super Admin & Owner) */}
       {activeTab === "blocks" && canManageBlocks(adminRole) && (
         <BlockManagementTab adminRole={adminRole} />
+      )}
+
+      {/* TAB 7: STOREFRONT MAINTENANCE MODE (Super Admin only) */}
+      {activeTab === "maintenance" && canManageMaintenance(adminRole) && (
+        <div className="mt-6">
+          <MaintenanceModeTab adminRole={adminRole} />
+        </div>
       )}
     </div>
   );
