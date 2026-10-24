@@ -30,32 +30,8 @@ export function Logo() {
   );
 }
 
-export function SearchBar({ className = "" }: { className?: string }) {
-  const { search, setSearch } = useStore();
-  return (
-    <div className={`relative ${className}`}>
-      <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-      <input
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search snacks, stationery, electronics…"
-        className="h-10 w-full rounded-full border border-input bg-card pl-9.5 pr-8 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-ring/30"
-        aria-label="Search products"
-      />
-      {search && (
-        <button
-          type="button"
-          onClick={() => setSearch("")}
-          className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
-          aria-label="Clear search query"
-        >
-          <X className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
+import { SearchBar } from "./SearchBar";
+export { SearchBar };
 
 export function Header() {
   const navigate = useNavigate();
