@@ -30,7 +30,9 @@ export type AdminPermission =
   | "view_business_reports"
   | "view_operational_reports"
   | "view_audit_logs"
-  | "manage_maintenance";
+  | "manage_maintenance"
+  | "manage_suggestions"
+  | "manage_contact";
 
 export interface RoleMetadata {
   id: AdminRole;
@@ -96,6 +98,8 @@ export const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> =
     "view_operational_reports",
     "view_audit_logs",
     "manage_maintenance",
+    "manage_suggestions",
+    "manage_contact",
   ]),
   owner: new Set<AdminPermission>([
     "manage_delivery_blocks",
@@ -114,6 +118,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, ReadonlySet<AdminPermission>> =
     "view_profitability_reports",
     "view_business_reports",
     "view_operational_reports",
+    "manage_suggestions",
   ]),
   store_manager: new Set<AdminPermission>([
     "manage_products",
@@ -173,6 +178,19 @@ export function canManageBranding(role: AdminRole | null | undefined): boolean {
 
 export function canManageMaintenance(role: AdminRole | null | undefined): boolean {
   return hasPermission(role, "manage_maintenance");
+}
+
+export function canManageSuggestions(role: AdminRole | null | undefined): boolean {
+  return hasPermission(role, "manage_suggestions");
+}
+
+export function canManageContact(role: AdminRole | null | undefined): boolean {
+  return hasPermission(role, "manage_contact");
+}
+
+export function canAccessSettings(role: AdminRole | null | undefined): boolean {
+  if (!role) return false;
+  return role === "super_admin" || role === "owner";
 }
 
 export function canViewAllOrders(role: AdminRole | null | undefined): boolean {

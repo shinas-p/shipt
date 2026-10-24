@@ -15,6 +15,8 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CartRouteImport } from './routes/cart'
 import { Route as CheckoutRouteImport } from './routes/checkout'
+import { Route as ContactRouteImport } from './routes/contact'
+import { Route as SuggestProductRouteImport } from './routes/suggest-product'
 import { Route as WishlistRouteImport } from './routes/wishlist'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as ProductProductIdRouteImport } from './routes/product.$productId'
@@ -49,6 +51,16 @@ const CheckoutRoute = CheckoutRouteImport.update({
   path: '/checkout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuggestProductRoute = SuggestProductRouteImport.update({
+  id: '/suggest-product',
+  path: '/suggest-product',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WishlistRoute = WishlistRouteImport.update({
   id: '/wishlist',
   path: '/wishlist',
@@ -72,6 +84,8 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/suggest-product': typeof SuggestProductRoute
   '/wishlist': typeof WishlistRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -83,6 +97,8 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/suggest-product': typeof SuggestProductRoute
   '/wishlist': typeof WishlistRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -95,6 +111,8 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/suggest-product': typeof SuggestProductRoute
   '/wishlist': typeof WishlistRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/product/$productId': typeof ProductProductIdRoute
@@ -108,6 +126,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/contact'
+    | '/suggest-product'
     | '/wishlist'
     | '/auth/callback'
     | '/product/$productId'
@@ -119,6 +139,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/contact'
+    | '/suggest-product'
     | '/wishlist'
     | '/auth/callback'
     | '/product/$productId'
@@ -130,6 +152,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/contact'
+    | '/suggest-product'
     | '/wishlist'
     | '/auth/callback'
     | '/product/$productId'
@@ -142,6 +166,8 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
+  ContactRoute: typeof ContactRoute
+  SuggestProductRoute: typeof SuggestProductRoute
   WishlistRoute: typeof WishlistRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   ProductProductIdRoute: typeof ProductProductIdRoute
@@ -191,6 +217,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CheckoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/suggest-product': {
+      id: '/suggest-product'
+      path: '/suggest-product'
+      fullPath: '/suggest-product'
+      preLoaderRoute: typeof SuggestProductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/wishlist': {
       id: '/wishlist'
       path: '/wishlist'
@@ -222,6 +262,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
+  ContactRoute: ContactRoute,
+  SuggestProductRoute: SuggestProductRoute,
   WishlistRoute: WishlistRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   ProductProductIdRoute: ProductProductIdRoute,

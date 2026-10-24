@@ -46,6 +46,9 @@ import {
   ScrollText,
   ShieldAlert,
   CheckCircle,
+  Settings,
+  Lightbulb,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,6 +65,9 @@ import { ProductManagementCenter } from "@/components/admin/products/ProductMana
 import { StoreBrandingTab } from "@/components/admin/StoreBrandingTab";
 import { BlockManagementTab } from "@/components/admin/BlockManagementTab";
 import { MaintenanceModeTab } from "@/components/admin/MaintenanceModeTab";
+import { ProductSuggestionsTab } from "@/components/admin/ProductSuggestionsTab";
+import { ContactSettingsView } from "@/components/admin/ContactSettingsView";
+import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
 import { useMaintenance } from "@/lib/maintenance";
 import type { DBCategory } from "@/components/admin/products/types";
 import {
@@ -72,6 +78,9 @@ import {
   canManageBlocks,
   canManageBranding,
   canManageMaintenance,
+  canManageSuggestions,
+  canManageContact,
+  canAccessSettings,
   canViewAllOrders,
   canViewAuditLogs,
   canAccessOrder,
@@ -260,8 +269,11 @@ function AdminPortalInner() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'blocks' | 'branding' | 'maintenance'
-  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding" | "maintenance">("dashboard");
+  // Active dashboard tab: 'dashboard' | 'orders' | 'products' | 'banners' | 'roles' | 'blocks' | 'branding' | 'maintenance' | 'suggestions' | 'settings'
+  const [activeTab, setActiveTab] = useState<
+    "dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding" | "maintenance" | "suggestions" | "settings"
+  >("dashboard");
+  const [settingsSubView, setSettingsSubView] = useState<SettingsSubView>("hub");
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -517,6 +529,12 @@ function AdminPortalInner() {
           return "dashboard";
         }
         if (!canManageBranding(resolvedRole) && prevTab === "branding") {
+          return "dashboard";
+        }
+        if (!canManageSuggestions(resolvedRole) && prevTab === "suggestions") {
+          return "dashboard";
+        }
+        if (!canAccessSettings(resolvedRole) && prevTab === "settings") {
           return "dashboard";
         }
         return prevTab;
@@ -1783,74 +1801,24 @@ function AdminPortalInner() {
           </button>
         )}
 
-        {/* Super Admin & Owner: Promotional Banners */}
-        {canManageBanners(adminRole) && (
+        {/* Super Admin & Owner: Central Settings Dashboard */}
+        {canAccessSettings(adminRole) && (
           <button
             type="button"
-            onClick={() => setActiveTab("banners")}
+            onClick={() => {
+              setActiveTab("settings");
+              setSettingsSubView("hub");
+            }}
             className={cn(
               "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "banners"
+              activeTab === "settings"
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"
             )}
+            id="admin-tab-settings"
           >
-            <ImageIcon className="size-4" />
-            <span>Promotional Banners ({banners.length})</span>
-          </button>
-        )}
-
-        {/* Super Admin: Staff Roles & Security */}
-        {canManageRoles(adminRole) && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("roles")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "roles"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            <Users className="size-4" />
-            <span>Staff & Security</span>
-          </button>
-        )}
-
-        {/* Super Admin & Owner: Store Branding */}
-        {canManageBranding(adminRole) && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("branding")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "branding"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            <Sparkles className="size-4" />
-            <span>Store Branding</span>
-          </button>
-        )}
-
-        {/* Super Admin: Maintenance Mode */}
-        {canManageMaintenance(adminRole) && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("maintenance")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "maintenance"
-                ? "bg-amber-600 text-white shadow-sm dark:bg-amber-500"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            <ShieldAlert className="size-4" />
-            <span>Maintenance Mode</span>
-            {isMaintenanceMode && (
-              <span className="size-2 rounded-full bg-amber-400 animate-ping ml-0.5" />
-            )}
+            <Settings className="size-4" />
+            <span>Settings</span>
           </button>
         )}
       </div>
@@ -2556,7 +2524,23 @@ function AdminPortalInner() {
 
       {/* TAB 3: PROMOTIONAL BANNERS MANAGEMENT (SUPER ADMIN & OWNER) */}
       {activeTab === "banners" && canManageBanners(adminRole) && (
-        <div className="mt-6 space-y-8">
+        <div className="mt-6 space-y-6">
+          <div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setActiveTab("settings");
+                setSettingsSubView("hub");
+              }}
+              className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-4" />
+              <span>Back to Settings Hub</span>
+            </Button>
+          </div>
+
           {/* Create or Edit Banner Card */}
           <div id="banner-form-card" className="rounded-3xl border border-border bg-card p-5 sm:p-7 shadow-xs">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2824,6 +2808,22 @@ function AdminPortalInner() {
       {/* TAB 4: STAFF & ROLES MANAGEMENT (SUPER ADMIN ONLY) */}
       {activeTab === "roles" && adminRole === "super_admin" && (
         <div className="mt-6 space-y-6">
+          <div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setActiveTab("settings");
+                setSettingsSubView("hub");
+              }}
+              className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-4" />
+              <span>Back to Settings Hub</span>
+            </Button>
+          </div>
+
           {/* Migration Pending Notice */}
           {rolesRpcPending && (
             <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5 shadow-xs">
@@ -3271,7 +3271,20 @@ function AdminPortalInner() {
 
       {/* TAB 5: STORE BRANDING SETTINGS (Super Admin & Owner) */}
       {activeTab === "branding" && canManageBranding(adminRole) && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setActiveTab("settings");
+              setSettingsSubView("hub");
+            }}
+            className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+            <span>Back to Settings Hub</span>
+          </Button>
           <StoreBrandingTab
             adminRole={adminRole}
             onNavigateStorefront={() => {}}
@@ -3286,8 +3299,107 @@ function AdminPortalInner() {
 
       {/* TAB 7: STOREFRONT MAINTENANCE MODE (Super Admin only) */}
       {activeTab === "maintenance" && canManageMaintenance(adminRole) && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setActiveTab("settings");
+              setSettingsSubView("hub");
+            }}
+            className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+            <span>Back to Settings Hub</span>
+          </Button>
           <MaintenanceModeTab adminRole={adminRole} />
+        </div>
+      )}
+
+      {/* TAB 8: PRODUCT SUGGESTIONS (Super Admin & Owner) */}
+      {activeTab === "suggestions" && canManageSuggestions(adminRole) && (
+        <div className="mt-6">
+          <ProductSuggestionsTab
+            adminRole={adminRole}
+            onBackToDashboard={() => {
+              setActiveTab("settings");
+              setSettingsSubView("hub");
+            }}
+          />
+        </div>
+      )}
+
+      {/* TAB 9: CENTRAL SETTINGS DASHBOARD (Super Admin & Owner) */}
+      {activeTab === "settings" && canAccessSettings(adminRole) && (
+        <div className="mt-6">
+          {settingsSubView === "hub" && (
+            <SettingsDashboardTab
+              adminRole={adminRole}
+              onNavigateSubView={(view) => {
+                if (view === "branding") {
+                  setActiveTab("branding");
+                } else if (view === "maintenance") {
+                  setActiveTab("maintenance");
+                } else if (view === "suggestions") {
+                  setActiveTab("suggestions");
+                } else if (view === "banners") {
+                  setActiveTab("banners");
+                } else if (view === "roles") {
+                  setActiveTab("roles");
+                } else {
+                  setSettingsSubView(view);
+                }
+              }}
+            />
+          )}
+
+          {settingsSubView === "contact" && (
+            <ContactSettingsView
+              adminRole={adminRole}
+              onBackToDashboard={() => setSettingsSubView("hub")}
+            />
+          )}
+
+          {settingsSubView === "suggestions" && (
+            <ProductSuggestionsTab
+              adminRole={adminRole}
+              onBackToDashboard={() => setSettingsSubView("hub")}
+            />
+          )}
+
+          {settingsSubView === "branding" && (
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSettingsSubView("hub")}
+                className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4" />
+                <span>Back to Settings Hub</span>
+              </Button>
+              <StoreBrandingTab
+                adminRole={adminRole}
+                onNavigateStorefront={() => {}}
+              />
+            </div>
+          )}
+
+          {settingsSubView === "maintenance" && (
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSettingsSubView("hub")}
+                className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4" />
+                <span>Back to Settings Hub</span>
+              </Button>
+              <MaintenanceModeTab adminRole={adminRole} />
+            </div>
+          )}
         </div>
       )}
     </div>

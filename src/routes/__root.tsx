@@ -23,6 +23,7 @@ import { CartDrawer } from "@/components/store/CartDrawer";
 import { ProductDetailsModal } from "@/components/store/ProductDetailsModal";
 import { OpeningLogoAnimation } from "@/components/store/OpeningLogoAnimation";
 import { MaintenanceView } from "@/components/store/MaintenanceView";
+import { SuggestProductFab } from "@/components/store/SuggestProductFab";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -148,6 +149,13 @@ function RootComponentContent() {
     );
   }
 
+  const isFabHidden =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/checkout") ||
+    location.pathname.startsWith("/accept-invitation") ||
+    location.pathname.startsWith("/auth") ||
+    location.pathname.startsWith("/suggest-product");
+
   return (
     <>
       <OpeningLogoAnimation />
@@ -158,6 +166,7 @@ function RootComponentContent() {
       <Footer />
       <CartDrawer />
       <ProductDetailsModal />
+      {!isFabHidden && <SuggestProductFab />}
       <Toaster position="top-center" richColors />
     </>
   );
