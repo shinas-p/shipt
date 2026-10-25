@@ -90,18 +90,27 @@ DROP POLICY IF EXISTS "product_suggestions_admin_select_all" ON public.product_s
 CREATE POLICY "product_suggestions_admin_select_all" ON public.product_suggestions
   FOR SELECT TO authenticated
   USING (
-    public.is_admin()
+    EXISTS (
+      SELECT 1 FROM public.admin_roles
+      WHERE user_id = auth.uid() AND role IN ('super_admin', 'owner')
+    )
   );
 
--- Policy D: Only Authorized Admins can update status, notes, and reviewed_by
+-- Policy D: Only Authorized Admins (Super Admin & Owner) can update status, notes, and reviewed_by
 DROP POLICY IF EXISTS "product_suggestions_admin_update" ON public.product_suggestions;
 CREATE POLICY "product_suggestions_admin_update" ON public.product_suggestions
   FOR UPDATE TO authenticated
   USING (
-    public.is_admin()
+    EXISTS (
+      SELECT 1 FROM public.admin_roles
+      WHERE user_id = auth.uid() AND role IN ('super_admin', 'owner')
+    )
   )
   WITH CHECK (
-    public.is_admin()
+    EXISTS (
+      SELECT 1 FROM public.admin_roles
+      WHERE user_id = auth.uid() AND role IN ('super_admin', 'owner')
+    )
   );
 
 -- 4. Storage Bucket Setup

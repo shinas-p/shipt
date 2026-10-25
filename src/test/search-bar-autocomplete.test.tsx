@@ -253,11 +253,16 @@ describe("SearchBar Autocomplete & Product Suggestions Suite", () => {
     fireEvent.change(input, { target: { value: "chip" } });
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/Clear search query/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/Clear search/i)).toBeInTheDocument();
     });
 
-    const clearBtn = screen.getByLabelText(/Clear search query/i);
-    fireEvent.click(clearBtn);
+    // Ensure only one single clear button is rendered (no duplicate X buttons)
+    const clearButtons = screen.getAllByLabelText(/Clear search/i);
+    expect(clearButtons.length).toBe(1);
+
+    const clearBtn = clearButtons[0];
+    expect(clearBtn).toBeDefined();
+    fireEvent.click(clearBtn!);
 
     expect(input).toHaveValue("");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();

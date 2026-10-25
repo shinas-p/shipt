@@ -7,13 +7,22 @@ import {
   cleanPhoneNumber,
 } from "@/data/contact";
 
+export interface UpdateContactResult {
+  success: boolean;
+  persistedToDatabase: boolean;
+  localOnly?: boolean | undefined;
+  warning?: string | undefined;
+  error?: string | undefined;
+}
+
 export function useStoreContact(): {
   contact: StoreContactInfo;
   isLoading: boolean;
+  dbStatus: "synced" | "migration_required" | "offline" | "error";
   refreshContact: () => Promise<void>;
   updateContact: (
     newContact: Partial<{ phone: string; email: string; whatsapp: string }>
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<UpdateContactResult>;
 } {
   const [contact, setContact] = useState<StoreContactInfo>(() => {
     if (typeof window !== "undefined") {
@@ -44,9 +53,13 @@ export function useStoreContact(): {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [dbStatus, setDbStatus] = useState<"synced" | "migration_required" | "offline" | "error">("synced");
 
   const refreshContact = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setDbStatus("offline");
+      return;
+    }
     try {
       setIsLoading(true);
       const { data, error } = await supabase
@@ -55,7 +68,25 @@ export function useStoreContact(): {
         .eq("id", "default")
         .maybeSingle();
 
-      if (!error && data) {
+      if (error) {
+        const isMissingColumns =
+          error.code === "PGRST204" ||
+          error.code === "PGRST205" ||
+          error.code === "42703" ||
+          error.message?.includes("schema cache") ||
+          error.message?.includes("does not exist") ||
+          error.message?.includes("column");
+
+        if (isMissingColumns) {
+          setDbStatus("migration_required");
+        } else {
+          setDbStatus("error");
+        }
+        return;
+      }
+
+      if (data) {
+        setDbStatus("synced");
         const phone = data.contact_phone || STORE_CONTACT.phone;
         const email = data.contact_email || STORE_CONTACT.email;
         const whatsapp = data.contact_whatsapp || STORE_CONTACT.whatsapp;
@@ -82,7 +113,7 @@ export function useStoreContact(): {
         }
       }
     } catch {
-      // Graceful fallback to cached or default STORE_CONTACT
+      setDbStatus("error");
     } finally {
       setIsLoading(false);
     }
@@ -91,7 +122,7 @@ export function useStoreContact(): {
   const updateContact = useCallback(
     async (
       newContact: Partial<{ phone: string; email: string; whatsapp: string }>
-    ): Promise<{ success: boolean; error?: string }> => {
+    ): Promise<UpdateContactResult> => {
       try {
         const phone = newContact.phone !== undefined ? newContact.phone.trim() : contact.phone;
         const email = newContact.email !== undefined ? newContact.email.trim() : contact.email;
@@ -111,7 +142,7 @@ export function useStoreContact(): {
           whatsappHref: `https://wa.me/${rawWa}`,
         };
 
-        // Immediately update state and local cache for instant storefront & footer sync
+        // Cache locally in current browser session
         setContact(fresh);
         if (typeof window !== "undefined") {
           try {
@@ -119,39 +150,68 @@ export function useStoreContact(): {
           } catch {}
         }
 
-        if (isSupabaseConfigured) {
-          const payload: Record<string, any> = {
-            updated_at: new Date().toISOString(),
+        if (!isSupabaseConfigured) {
+          return {
+            success: false,
+            persistedToDatabase: false,
+            localOnly: true,
+            warning: "Saved locally in this browser only. Supabase client is unconfigured.",
           };
-          if (newContact.phone !== undefined) payload["contact_phone"] = phone;
-          if (newContact.email !== undefined) payload["contact_email"] = email;
-          if (newContact.whatsapp !== undefined) payload["contact_whatsapp"] = whatsapp;
-
-          const { error: dbError } = await supabase
-            .from("store_settings")
-            .update(payload)
-            .eq("id", "default");
-
-          if (dbError) {
-            const isMissingColumns =
-              dbError.code === "PGRST204" ||
-              dbError.code === "PGRST205" ||
-              dbError.code === "42703" ||
-              dbError.message?.includes("schema cache") ||
-              dbError.message?.includes("does not exist") ||
-              dbError.message?.includes("column");
-
-            if (isMissingColumns) {
-              // Gracefully handled: saved locally, migration required for persistent remote DB
-              return { success: true };
-            }
-            return { success: false, error: dbError.message };
-          }
         }
 
-        return { success: true };
+        const payload: Record<string, any> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (newContact.phone !== undefined) payload["contact_phone"] = phone;
+        if (newContact.email !== undefined) payload["contact_email"] = email;
+        if (newContact.whatsapp !== undefined) payload["contact_whatsapp"] = whatsapp;
+
+        const { error: dbError } = await supabase
+          .from("store_settings")
+          .update(payload)
+          .eq("id", "default");
+
+        if (dbError) {
+          const isMissingColumns =
+            dbError.code === "PGRST204" ||
+            dbError.code === "PGRST205" ||
+            dbError.code === "42703" ||
+            dbError.message?.includes("schema cache") ||
+            dbError.message?.includes("does not exist") ||
+            dbError.message?.includes("column");
+
+          if (isMissingColumns) {
+            setDbStatus("migration_required");
+            return {
+              success: false,
+              persistedToDatabase: false,
+              localOnly: true,
+              warning:
+                "Database migration required: contact columns (contact_phone, contact_email, contact_whatsapp) do not exist in public.store_settings. Changes are saved in this browser only until migration 20261026000000 is applied.",
+            };
+          }
+
+          setDbStatus("error");
+          return {
+            success: false,
+            persistedToDatabase: false,
+            localOnly: false,
+            error: dbError.message || "Failed to update store contact in database.",
+          };
+        }
+
+        setDbStatus("synced");
+        return {
+          success: true,
+          persistedToDatabase: true,
+        };
       } catch (err: any) {
-        return { success: false, error: err?.message || "Failed to update contact" };
+        return {
+          success: false,
+          persistedToDatabase: false,
+          localOnly: false,
+          error: err?.message || "Failed to update contact settings.",
+        };
       }
     },
     [contact]
@@ -161,5 +221,5 @@ export function useStoreContact(): {
     refreshContact();
   }, [refreshContact]);
 
-  return { contact, isLoading, refreshContact, updateContact };
+  return { contact, isLoading, dbStatus, refreshContact, updateContact };
 }

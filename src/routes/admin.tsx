@@ -49,6 +49,7 @@ import {
   Settings,
   Lightbulb,
   ArrowLeft,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,12 @@ import { MaintenanceModeTab } from "@/components/admin/MaintenanceModeTab";
 import { ProductSuggestionsTab } from "@/components/admin/ProductSuggestionsTab";
 import { ContactSettingsView } from "@/components/admin/ContactSettingsView";
 import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
+import { TabVisibilitySettingsView } from "@/components/admin/TabVisibilitySettingsView";
+import { TabVisibilitySettingsSection } from "@/components/admin/TabVisibilitySettingsSection";
+import {
+  useAdminTabVisibility,
+  getSafeFallbackTab,
+} from "@/lib/adminTabVisibility";
 import { useMaintenance } from "@/lib/maintenance";
 import type { DBCategory } from "@/components/admin/products/types";
 import {
@@ -274,6 +281,50 @@ function AdminPortalInner() {
     "dashboard" | "orders" | "products" | "banners" | "roles" | "blocks" | "branding" | "maintenance" | "suggestions" | "settings"
   >("dashboard");
   const [settingsSubView, setSettingsSubView] = useState<SettingsSubView>("hub");
+
+  // Admin Tab Visibility customisation
+  const {
+    visibleTabList,
+    isTabVisible,
+    preferences: tabVisibilityPreferences,
+  } = useAdminTabVisibility(session?.user?.id, adminRole);
+
+  // Safety rule: if activeTab is not permitted or is hidden, safely navigate to another visible permitted tab
+  useEffect(() => {
+    if (!authLoading && !isTabVisible(activeTab)) {
+      const fallbackTab = getSafeFallbackTab(activeTab, tabVisibilityPreferences, adminRole);
+      setActiveTab(fallbackTab);
+    }
+  }, [activeTab, isTabVisible, tabVisibilityPreferences, adminRole, authLoading]);
+
+  // Unified Settings sections configuration
+  const settingsSections = useMemo<
+    Array<{
+      id: SettingsSubView;
+      label: string;
+      icon: any;
+      requiresSuperAdmin?: boolean | undefined;
+      badge?: string | undefined;
+    }>
+  >(
+    () => [
+      { id: "hub", label: "Overview", icon: LayoutGrid },
+      { id: "branding", label: "Store Branding", icon: Sparkles },
+      { id: "contact", label: "Contact Info", icon: Phone },
+      { id: "tab_visibility", label: "Tab Visibility", icon: SlidersHorizontal },
+      { id: "banners", label: "Promotional Banners", icon: ImageIcon },
+      {
+        id: "maintenance",
+        label: "Maintenance Mode",
+        icon: ShieldAlert,
+        requiresSuperAdmin: true,
+        badge: isMaintenanceMode ? "Active" : undefined,
+      },
+      { id: "suggestions", label: "Product Suggestions", icon: Lightbulb },
+      { id: "roles", label: "Staff & Security", icon: Users, requiresSuperAdmin: true },
+    ],
+    [isMaintenanceMode]
+  );
 
   // Orders state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
@@ -1734,94 +1785,100 @@ function AdminPortalInner() {
 
       {/* Tabs Navigation */}
       <div className="mt-6 flex gap-2 border-b border-border pb-2 overflow-x-auto [scrollbar-width:none]">
-        <button
-          type="button"
-          onClick={() => setActiveTab("dashboard")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-            activeTab === "dashboard"
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-          )}
-        >
-          <LayoutDashboard className="size-4" />
-          <span>Dashboard</span>
-        </button>
+        {visibleTabList.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
 
-        <button
-          type="button"
-          onClick={() => setActiveTab("orders")}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-            activeTab === "orders"
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-          )}
-        >
-          <Package className="size-4" />
-          <span>
-            {adminRole === "block_manager"
-              ? `Block Orders (${scopedOrders.length})`
-              : adminRole === "store_manager"
-              ? `Pickup Orders (${scopedOrders.length})`
-              : `Orders (${scopedOrders.length})`}
-          </span>
-        </button>
+          let labelContent = <span>{tab.label}</span>;
+          if (tab.id === "orders") {
+            labelContent = (
+              <span>
+                {adminRole === "block_manager"
+                  ? `Block Orders (${scopedOrders.length})`
+                  : adminRole === "store_manager"
+                  ? `Pickup Orders (${scopedOrders.length})`
+                  : `Orders (${scopedOrders.length})`}
+              </span>
+            );
+          } else if (tab.id === "products") {
+            labelContent = <span>Products & Stock ({dbProducts.length})</span>;
+          }
 
-        {canManageCatalog(adminRole) && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("products")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "products"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            <Layers className="size-4" />
-            <span>Products & Stock ({dbProducts.length})</span>
-          </button>
-        )}
-
-        {/* Super Admin & Owner: Delivery Blocks */}
-        {canManageBlocks(adminRole) && (
-          <button
-            type="button"
-            onClick={() => setActiveTab("blocks")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "blocks"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-          >
-            <Building2 className="size-4" />
-            <span>Delivery Blocks</span>
-          </button>
-        )}
-
-        {/* Super Admin & Owner: Central Settings Dashboard */}
-        {canAccessSettings(adminRole) && (
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("settings");
-              setSettingsSubView("hub");
-            }}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
-              activeTab === "settings"
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            )}
-            id="admin-tab-settings"
-          >
-            <Settings className="size-4" />
-            <span>Settings</span>
-          </button>
-        )}
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                if (tab.id === "settings") {
+                  setActiveTab("settings");
+                  setSettingsSubView("hub");
+                } else {
+                  setActiveTab(tab.id);
+                }
+              }}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shrink-0",
+                isActive
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+              id={`admin-tab-${tab.id}`}
+            >
+              <Icon className="size-4" />
+              {labelContent}
+            </button>
+          );
+        })}
       </div>
+
+      {/* UNIFIED SETTINGS SECTION NAVIGATION BAR */}
+      {activeTab === "settings" && canAccessSettings(adminRole) && (
+        <div className="mt-6">
+          <div className="rounded-2xl border border-border bg-card p-1.5 shadow-xs">
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 sm:pb-0">
+              {settingsSections.map((sec) => {
+                const Icon = sec.icon;
+                const isActive = settingsSubView === sec.id;
+                const isRestricted = sec.requiresSuperAdmin && adminRole !== "super_admin";
+
+                return (
+                  <button
+                    key={sec.id}
+                    type="button"
+                    disabled={isRestricted}
+                    onClick={() => setSettingsSubView(sec.id)}
+                    className={cn(
+                      "flex items-center gap-2 whitespace-nowrap rounded-xl px-3.5 py-2 text-xs font-semibold transition shrink-0",
+                      isActive
+                        ? "bg-primary text-primary-foreground shadow-xs font-bold"
+                        : isRestricted
+                        ? "text-muted-foreground/50 opacity-60 cursor-not-allowed"
+                        : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                    <span>{sec.label}</span>
+                    {isRestricted ? (
+                      <Lock className="size-3 text-muted-foreground/60" />
+                    ) : sec.badge ? (
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.2 text-[9px] font-bold uppercase",
+                          isActive
+                            ? "bg-primary-foreground/20 text-primary-foreground"
+                            : "bg-amber-500/20 text-amber-800 dark:text-amber-300"
+                        )}
+                      >
+                        {sec.badge}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB 0: SMART DASHBOARD OVERVIEW */}
       {activeTab === "dashboard" && (
@@ -2523,7 +2580,8 @@ function AdminPortalInner() {
       )}
 
       {/* TAB 3: PROMOTIONAL BANNERS MANAGEMENT (SUPER ADMIN & OWNER) */}
-      {activeTab === "banners" && canManageBanners(adminRole) && (
+      {((activeTab === "banners" && canManageBanners(adminRole)) ||
+        (activeTab === "settings" && settingsSubView === "banners" && canManageBanners(adminRole))) && (
         <div className="mt-6 space-y-6">
           <div>
             <Button
@@ -2537,7 +2595,7 @@ function AdminPortalInner() {
               className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="size-4" />
-              <span>Back to Settings Hub</span>
+              <span>Back to Settings Overview</span>
             </Button>
           </div>
 
@@ -2806,7 +2864,8 @@ function AdminPortalInner() {
       )}
 
       {/* TAB 4: STAFF & ROLES MANAGEMENT (SUPER ADMIN ONLY) */}
-      {activeTab === "roles" && adminRole === "super_admin" && (
+      {((activeTab === "roles" && adminRole === "super_admin") ||
+        (activeTab === "settings" && settingsSubView === "roles" && adminRole === "super_admin")) && (
         <div className="mt-6 space-y-6">
           <div>
             <Button
@@ -2820,7 +2879,7 @@ function AdminPortalInner() {
               className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
             >
               <ArrowLeft className="size-4" />
-              <span>Back to Settings Hub</span>
+              <span>Back to Settings Overview</span>
             </Button>
           </div>
 
@@ -3336,22 +3395,29 @@ function AdminPortalInner() {
           {settingsSubView === "hub" && (
             <SettingsDashboardTab
               adminRole={adminRole}
+              userId={session?.user?.id}
               onNavigateSubView={(view) => {
-                if (view === "branding") {
-                  setActiveTab("branding");
-                } else if (view === "maintenance") {
-                  setActiveTab("maintenance");
-                } else if (view === "suggestions") {
-                  setActiveTab("suggestions");
-                } else if (view === "banners") {
-                  setActiveTab("banners");
-                } else if (view === "roles") {
-                  setActiveTab("roles");
-                } else {
-                  setSettingsSubView(view);
-                }
+                setSettingsSubView(view);
               }}
             />
+          )}
+
+          {settingsSubView === "tab_visibility" && (
+            <div className="space-y-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSettingsSubView("hub")}
+                className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4" />
+                <span>Back to Settings Overview</span>
+              </Button>
+              <TabVisibilitySettingsSection
+                adminRole={adminRole}
+                userId={session?.user?.id}
+              />
+            </div>
           )}
 
           {settingsSubView === "contact" && (
@@ -3377,7 +3443,7 @@ function AdminPortalInner() {
                 className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="size-4" />
-                <span>Back to Settings Hub</span>
+                <span>Back to Settings Overview</span>
               </Button>
               <StoreBrandingTab
                 adminRole={adminRole}
@@ -3395,9 +3461,21 @@ function AdminPortalInner() {
                 className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
                 <ArrowLeft className="size-4" />
-                <span>Back to Settings Hub</span>
+                <span>Back to Settings Overview</span>
               </Button>
-              <MaintenanceModeTab adminRole={adminRole} />
+              {canManageMaintenance(adminRole) ? (
+                <MaintenanceModeTab adminRole={adminRole} />
+              ) : (
+                <div className="rounded-3xl border border-border/80 bg-card p-8 shadow-soft text-center space-y-3">
+                  <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+                    <Lock className="size-6" />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-foreground">Restricted to Super Admin</h3>
+                  <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                    Super Admin privileges are required to toggle storefront maintenance mode or alter operational outage notices.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

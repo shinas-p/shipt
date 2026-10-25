@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   Lock,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,15 +36,18 @@ export type SettingsSubView =
   | "suggestions"
   | "maintenance"
   | "banners"
-  | "roles";
+  | "roles"
+  | "tab_visibility";
 
 interface SettingsDashboardTabProps {
   adminRole: AdminRole | null;
+  userId?: string | null | undefined;
   onNavigateSubView: (view: SettingsSubView) => void;
 }
 
 export function SettingsDashboardTab({
   adminRole,
+  userId,
   onNavigateSubView,
 }: SettingsDashboardTabProps) {
   const { branding } = useBranding();
@@ -54,6 +58,18 @@ export function SettingsDashboardTab({
   const roleBadge = getRoleBadge(adminRole);
 
   const categories = [
+    {
+      id: "tab_visibility",
+      title: "Admin Tab Visibility",
+      icon: SlidersHorizontal,
+      iconColor: "text-primary bg-primary/10",
+      description: "Customise your navigation bar. Choose which management tabs are displayed in the top bar for your account.",
+      details: "Master 'Show All Tabs' toggle & individual tab controls",
+      actionLabel: "Configure Tab Visibility",
+      authorized: true,
+      targetView: "tab_visibility" as SettingsSubView,
+      badge: "Navigation",
+    },
     {
       id: "branding",
       title: "Store Identity & Branding",
@@ -155,6 +171,7 @@ export function SettingsDashboardTab({
           </div>
         </div>
       </div>
+
 
       {/* Settings Category Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2">

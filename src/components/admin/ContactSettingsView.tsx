@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Phone,
   Mail,
@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Database,
   Loader2,
   ExternalLink,
   Shield,
@@ -27,7 +29,7 @@ export function ContactSettingsView({
   adminRole,
   onBackToDashboard,
 }: ContactSettingsViewProps) {
-  const { contact, updateContact, isLoading } = useStoreContact();
+  const { contact, updateContact, isLoading, dbStatus } = useStoreContact();
   const isAuthorized = canManageContact(adminRole);
 
   const [phone, setPhone] = useState(contact.phone);
@@ -35,12 +37,17 @@ export function ContactSettingsView({
   const [whatsapp, setWhatsapp] = useState(contact.whatsapp);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [localWarning, setLocalWarning] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const isDirtyRef = useRef(false);
+
   useEffect(() => {
-    setPhone(contact.phone);
-    setEmail(contact.email);
-    setWhatsapp(contact.whatsapp);
+    if (!isDirtyRef.current) {
+      setPhone(contact.phone);
+      setEmail(contact.email);
+      setWhatsapp(contact.whatsapp);
+    }
   }, [contact]);
 
   // Dynamically compute authoritative links from the active inputs
@@ -64,6 +71,7 @@ export function ContactSettingsView({
 
     setSaving(true);
     setErrorMsg(null);
+    setLocalWarning(null);
     setSaveSuccess(false);
 
     try {
@@ -73,15 +81,29 @@ export function ContactSettingsView({
         whatsapp: whatsapp.trim(),
       });
 
-      if (!res.success) {
+      if (res.persistedToDatabase) {
+        setSaveSuccess(true);
+        setLocalWarning(null);
+        setErrorMsg(null);
+        toast.success("Contact settings saved to Supabase database successfully!");
+        setTimeout(() => setSaveSuccess(false), 5000);
+      } else if (res.localOnly) {
+        setSaveSuccess(false);
+        setLocalWarning(
+          res.warning ||
+            "Contact details saved to this browser only. Supabase database columns are missing — run migration 20261026000000 to persist for all customer devices."
+        );
+        setErrorMsg(null);
+        toast.warning("Saved locally only. Database migration required in Supabase.");
+      } else {
+        setSaveSuccess(false);
+        setLocalWarning(null);
         setErrorMsg(res.error || "Failed to update contact settings");
         toast.error(res.error || "Failed to update contact settings");
-      } else {
-        setSaveSuccess(true);
-        toast.success("Store contact information updated successfully!");
-        setTimeout(() => setSaveSuccess(false), 4000);
       }
     } catch (err: any) {
+      setSaveSuccess(false);
+      setLocalWarning(null);
       setErrorMsg(err?.message || "Failed to save contact settings");
     } finally {
       setSaving(false);
@@ -131,17 +153,55 @@ export function ContactSettingsView({
         </div>
       </div>
 
-      {/* Save Success Banner */}
+      {/* Database Schema Status Notice */}
+      {dbStatus === "migration_required" && !localWarning && !saveSuccess && (
+        <div 
+          id="contact-db-status-notice"
+          className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3"
+        >
+          <Database className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Database Columns Pending Migration</p>
+            <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+              The remote <code>public.store_settings</code> table is currently missing contact columns. Saving contact details now will store them in this browser only until migration <code>20261026000000_contact_and_suggestions.sql</code> is executed in Supabase.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Save Success Banner (Confirmed Database Save) */}
       {saveSuccess && (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+        <div 
+          id="contact-save-success-banner"
+          className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"
+        >
           <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-          <span>Contact coordinates successfully updated across the store!</span>
+          <span>Contact coordinates successfully updated and saved to database!</span>
+        </div>
+      )}
+
+      {/* Local-Only Fallback Warning Banner */}
+      {localWarning && (
+        <div 
+          id="contact-local-only-warning"
+          className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-start gap-2.5"
+        >
+          <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">Saved Locally in Browser Only</p>
+            <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+              {localWarning}
+            </p>
+          </div>
         </div>
       )}
 
       {/* Error Banner */}
       {errorMsg && (
-        <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-xs font-semibold text-destructive flex items-center gap-2">
+        <div 
+          id="contact-save-error-banner"
+          className="rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-xs font-semibold text-destructive flex items-center gap-2"
+        >
           <AlertCircle className="size-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
@@ -165,7 +225,10 @@ export function ContactSettingsView({
                   required
                   disabled={!isAuthorized}
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setPhone(e.target.value);
+                  }}
                   placeholder="+91 9605174298"
                   className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:opacity-75 disabled:cursor-not-allowed font-mono"
                   id="admin-contact-phone-input"
@@ -190,7 +253,10 @@ export function ContactSettingsView({
                   required
                   disabled={!isAuthorized}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setEmail(e.target.value);
+                  }}
                   placeholder="dhemartforyou@gmail.com"
                   className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:opacity-75 disabled:cursor-not-allowed font-mono"
                   id="admin-contact-email-input"
@@ -215,7 +281,10 @@ export function ContactSettingsView({
                   required
                   disabled={!isAuthorized}
                   value={whatsapp}
-                  onChange={(e) => setWhatsapp(e.target.value)}
+                  onChange={(e) => {
+                    isDirtyRef.current = true;
+                    setWhatsapp(e.target.value);
+                  }}
                   placeholder="+91 9605174298"
                   className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:opacity-75 disabled:cursor-not-allowed font-mono"
                   id="admin-contact-whatsapp-input"

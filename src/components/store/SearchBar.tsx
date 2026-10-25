@@ -177,14 +177,29 @@ export function SearchBar({
   };
 
   // Clear query handler
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     setInputValue("");
     setDebouncedQuery("");
     setSearch("");
     setIsOpen(false);
     setActiveIndex(-1);
     inputRef.current?.focus();
-  };
+  }, [setSearch]);
+
+  // Handle native search clear if triggered by browser
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const handleNativeSearch = () => {
+      if (el.value === "") {
+        handleClear();
+      }
+    };
+    el.addEventListener("search", handleNativeSearch);
+    return () => {
+      el.removeEventListener("search", handleNativeSearch);
+    };
+  }, [handleClear]);
 
   // Navigate to product detail page
   const handleSelectProduct = useCallback(
@@ -305,7 +320,7 @@ export function SearchBar({
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="peer h-10 w-full rounded-full border border-input bg-card pl-9.5 pr-14 text-sm outline-none transition duration-150 focus:border-primary focus:ring-2 focus:ring-ring/30 shadow-2xs"
+          className="peer h-10 w-full rounded-full border border-input bg-card pl-9.5 pr-14 text-sm outline-none transition duration-150 focus:border-primary focus:ring-2 focus:ring-ring/30 shadow-2xs [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:appearance-none [&::-ms-clear]:hidden"
           aria-label="Search products"
           aria-expanded={showDropdown}
           aria-autocomplete="list"
@@ -332,7 +347,8 @@ export function SearchBar({
               type="button"
               onClick={handleClear}
               className="rounded-full p-1 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-              aria-label="Clear search query"
+              aria-label="Clear search"
+              title="Clear search"
             >
               <X className="size-3.5" />
             </button>
