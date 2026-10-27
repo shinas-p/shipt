@@ -453,14 +453,14 @@ export function ProfitabilityTab({
               <tr>
                 <th className="p-3.5 pl-5">Product</th>
                 <th className="p-3.5 text-right">Selling Price</th>
-                <th className="p-3.5 text-right">Supplier Cost</th>
+                <th className="p-3.5 text-right">Cost per piece</th>
                 <th className="p-3.5 text-right">Other Costs</th>
                 <th className="p-3.5 text-right">Unit Profit</th>
                 <th className="p-3.5 text-center">Margin (%)</th>
                 <th className="p-3.5 text-center">Markup (%)</th>
                 <th className="p-3.5 text-center">Stock</th>
                 <th className="p-3.5 text-right">Total Cost</th>
-                <th className="p-3.5 text-right">Potential Profit</th>
+                <th className="p-3.5 text-right">Expected gross profit</th>
                 <th className="p-3.5 pr-5 text-right">Action</th>
               </tr>
             </thead>

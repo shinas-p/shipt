@@ -22,7 +22,14 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { formatINR } from "@/data/products";
 import { BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
-import { calculateProfitMetrics, fetchProductCost, saveProductCost } from "@/lib/profitability";
+import {
+  calculateProfitMetrics,
+  calculateWholesaleMetrics,
+  fetchProductCost,
+  saveProductCost,
+  type WholesaleBatchParams,
+  type WholesaleMetrics,
+} from "@/lib/profitability";
 import { canManageCosts, type AdminRole } from "@/lib/permissions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -63,26 +70,41 @@ export function ProductFormModal({
   const [isActive, setIsActive] = useState(true);
 
   // Private Cost State (Admin Only)
+  const [costMode, setCostMode] = useState<"batch" | "unit">("batch");
   const [supplierCost, setSupplierCost] = useState("");
   const [otherCosts, setOtherCosts] = useState("");
   const [costNotes, setCostNotes] = useState("");
   const [loadingCost, setLoadingCost] = useState(false);
+
+  // Wholesale Batch Procurement State
+  const [batchCost, setBatchCost] = useState("");
+  const [packCount, setPackCount] = useState("");
+  const [piecesPerPack, setPiecesPerPack] = useState("");
+  const [totalPieces, setTotalPieces] = useState("");
+  const [batchOtherCosts, setBatchOtherCosts] = useState("");
+  const [unitOtherCosts, setUnitOtherCosts] = useState("");
 
   // Images state (array of uploaded URLs, first one is primary)
   const [images, setImages] = useState<string[]>([]);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
-interface FormErrors {
-  name?: string | undefined;
-  size?: string | undefined;
-  category?: string | undefined;
-  price?: string | undefined;
-  originalPrice?: string | undefined;
-  stock?: string | undefined;
-  supplierCost?: string | undefined;
-  otherCosts?: string | undefined;
-}
+  interface FormErrors {
+    name?: string | undefined;
+    size?: string | undefined;
+    category?: string | undefined;
+    price?: string | undefined;
+    originalPrice?: string | undefined;
+    stock?: string | undefined;
+    supplierCost?: string | undefined;
+    otherCosts?: string | undefined;
+    batchCost?: string | undefined;
+    packCount?: string | undefined;
+    piecesPerPack?: string | undefined;
+    totalPieces?: string | undefined;
+    batchOtherCosts?: string | undefined;
+    unitOtherCosts?: string | undefined;
+  }
 
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -114,18 +136,51 @@ interface FormErrors {
           fetchProductCost(product.id)
             .then((costData) => {
               if (costData) {
-                setSupplierCost(costData.supplier_cost > 0 ? String(costData.supplier_cost) : "");
-                setOtherCosts(costData.other_costs > 0 ? String(costData.other_costs) : "");
+                if (costData.cost_mode === "batch" || (costData.batch_cost != null && costData.batch_cost > 0)) {
+                  setCostMode("batch");
+                  setBatchCost(costData.batch_cost != null ? String(costData.batch_cost) : "");
+                  setPackCount(costData.pack_count != null ? String(costData.pack_count) : "");
+                  setPiecesPerPack(costData.pieces_per_pack != null ? String(costData.pieces_per_pack) : "");
+                  setTotalPieces(costData.total_pieces != null ? String(costData.total_pieces) : "");
+                  setBatchOtherCosts(costData.batch_other_costs ? String(costData.batch_other_costs) : "");
+                  setUnitOtherCosts(costData.unit_other_costs ? String(costData.unit_other_costs) : "");
+                  setSupplierCost(costData.supplier_cost > 0 ? String(costData.supplier_cost) : "");
+                  setOtherCosts(costData.other_costs > 0 ? String(costData.other_costs) : "");
+                } else {
+                  setCostMode("unit");
+                  setSupplierCost(costData.supplier_cost > 0 ? String(costData.supplier_cost) : "");
+                  setOtherCosts(costData.other_costs > 0 ? String(costData.other_costs) : "");
+                  setBatchCost("");
+                  setPackCount("");
+                  setPiecesPerPack("");
+                  setTotalPieces("");
+                  setBatchOtherCosts("");
+                  setUnitOtherCosts("");
+                }
                 setCostNotes(costData.notes || "");
               } else {
+                setCostMode("batch");
                 setSupplierCost("");
                 setOtherCosts("");
+                setBatchCost("");
+                setPackCount("");
+                setPiecesPerPack("");
+                setTotalPieces("");
+                setBatchOtherCosts("");
+                setUnitOtherCosts("");
                 setCostNotes("");
               }
             })
             .catch(() => {
+              setCostMode("batch");
               setSupplierCost("");
               setOtherCosts("");
+              setBatchCost("");
+              setPackCount("");
+              setPiecesPerPack("");
+              setTotalPieces("");
+              setBatchOtherCosts("");
+              setUnitOtherCosts("");
               setCostNotes("");
             })
             .finally(() => {
@@ -146,8 +201,15 @@ interface FormErrors {
         setIsNew(true);
         setIsActive(true);
         setImages([]);
+        setCostMode("batch");
         setSupplierCost("");
         setOtherCosts("");
+        setBatchCost("");
+        setPackCount("");
+        setPiecesPerPack("");
+        setTotalPieces("");
+        setBatchOtherCosts("");
+        setUnitOtherCosts("");
         setCostNotes("");
         setLoadingCost(false);
       }
@@ -231,6 +293,36 @@ interface FormErrors {
     toast.info("Primary display image updated.");
   };
 
+  // Wholesale Pack & Piece Calculations
+  const handlePackCountChange = (val: string) => {
+    setPackCount(val);
+    const packs = parseFloat(val);
+    const pieces = parseFloat(piecesPerPack);
+    if (!isNaN(packs) && packs > 0 && !isNaN(pieces) && pieces > 0) {
+      const calcTotal = Math.round(packs * pieces);
+      setTotalPieces(String(calcTotal));
+      setStock(String(calcTotal));
+    }
+  };
+
+  const handlePiecesPerPackChange = (val: string) => {
+    setPiecesPerPack(val);
+    const packs = parseFloat(packCount);
+    const pieces = parseFloat(val);
+    if (!isNaN(packs) && packs > 0 && !isNaN(pieces) && pieces > 0) {
+      const calcTotal = Math.round(packs * pieces);
+      setTotalPieces(String(calcTotal));
+      setStock(String(calcTotal));
+    }
+  };
+
+  const handleTotalPiecesChange = (val: string) => {
+    setTotalPieces(val);
+    if (val.trim() && !isNaN(parseInt(val, 10)) && parseInt(val, 10) > 0) {
+      setStock(String(parseInt(val, 10)));
+    }
+  };
+
   // Calculated discount
   const priceNum = parseFloat(price);
   const origPriceNum = originalPrice.trim() ? parseFloat(originalPrice) : null;
@@ -239,8 +331,35 @@ interface FormErrors {
       ? Math.round((1 - priceNum / origPriceNum) * 100)
       : 0;
 
-  // Real-time Profit, Margin & Markup Calculation
-  const profitMetrics = calculateProfitMetrics(price, supplierCost, otherCosts);
+  // Real-time Wholesale & Unit Profit Metrics Calculation
+  const wholesaleParams: WholesaleBatchParams = {
+    costMode,
+    batchCost: batchCost.trim() ? batchCost : undefined,
+    packCount: packCount.trim() ? packCount : undefined,
+    piecesPerPack: piecesPerPack.trim() ? piecesPerPack : undefined,
+    totalPieces: totalPieces.trim() ? totalPieces : stock,
+    batchOtherCosts: batchOtherCosts.trim() ? batchOtherCosts : undefined,
+    unitOtherCosts: unitOtherCosts.trim() ? unitOtherCosts : undefined,
+  };
+
+  const wholesaleMetrics =
+    costMode === "batch"
+      ? calculateWholesaleMetrics(
+          price,
+          wholesaleParams,
+          supplierCost,
+          otherCosts,
+          stock
+        )
+      : null;
+
+  const profitMetrics = calculateProfitMetrics(
+    price,
+    supplierCost,
+    otherCosts,
+    costMode === "batch" ? wholesaleParams : null,
+    stock
+  );
 
   // Validation
   const validate = (): boolean => {
@@ -264,17 +383,38 @@ interface FormErrors {
       errs.stock = "Stock must be a non-negative integer.";
     }
 
-    if (supplierCost.trim()) {
-      const supplierCostNum = parseFloat(supplierCost);
-      if (isNaN(supplierCostNum) || supplierCostNum < 0) {
-        errs.supplierCost = "Supplier cost must be a non-negative number.";
+    if (costMode === "batch") {
+      if (batchCost.trim()) {
+        const batchCostNum = parseFloat(batchCost);
+        if (isNaN(batchCostNum) || batchCostNum < 0) {
+          errs.batchCost = "Batch purchase cost must be a non-negative number.";
+        }
       }
-    }
+      if (batchOtherCosts.trim()) {
+        const batchOtherNum = parseFloat(batchOtherCosts);
+        if (isNaN(batchOtherNum) || batchOtherNum < 0) {
+          errs.batchOtherCosts = "Batch other costs must be a non-negative number.";
+        }
+      }
+      if (unitOtherCosts.trim()) {
+        const unitOtherNum = parseFloat(unitOtherCosts);
+        if (isNaN(unitOtherNum) || unitOtherNum < 0) {
+          errs.unitOtherCosts = "Per-piece other costs must be a non-negative number.";
+        }
+      }
+    } else {
+      if (supplierCost.trim()) {
+        const supplierCostNum = parseFloat(supplierCost);
+        if (isNaN(supplierCostNum) || supplierCostNum < 0) {
+          errs.supplierCost = "Supplier cost must be a non-negative number.";
+        }
+      }
 
-    if (otherCosts.trim()) {
-      const otherCostsNum = parseFloat(otherCosts);
-      if (isNaN(otherCostsNum) || otherCostsNum < 0) {
-        errs.otherCosts = "Other costs must be a non-negative number.";
+      if (otherCosts.trim()) {
+        const otherCostsNum = parseFloat(otherCosts);
+        if (isNaN(otherCostsNum) || otherCostsNum < 0) {
+          errs.otherCosts = "Other costs must be a non-negative number.";
+        }
       }
     }
 
@@ -390,18 +530,61 @@ interface FormErrors {
       // Save private supplier cost & other expenses (authorized Super Admin / Owner only)
       const targetProductId = savedProductId;
       if (canSeeCosts && targetProductId) {
-        const cleanSupplier = supplierCost.trim() ? Math.max(0, parseFloat(supplierCost) || 0) : 0;
-        const cleanOther = otherCosts.trim() ? Math.max(0, parseFloat(otherCosts) || 0) : 0;
+        if (costMode === "batch") {
+          const cleanBatchCost = batchCost.trim() ? Math.max(0, parseFloat(batchCost) || 0) : 0;
+          const cleanPackCount = packCount.trim() ? Math.max(0, parseFloat(packCount) || 0) : undefined;
+          const cleanPiecesPerPack = piecesPerPack.trim() ? Math.max(0, parseFloat(piecesPerPack) || 0) : undefined;
+          const cleanTotalPieces = totalPieces.trim()
+            ? Math.max(1, parseInt(totalPieces, 10) || 1)
+            : Math.max(1, parseInt(stock, 10) || 1);
+          const cleanBatchOther = batchOtherCosts.trim() ? Math.max(0, parseFloat(batchOtherCosts) || 0) : 0;
+          const cleanUnitOther = unitOtherCosts.trim() ? Math.max(0, parseFloat(unitOtherCosts) || 0) : 0;
 
-        if (cleanSupplier > 0 || cleanOther > 0 || costNotes.trim() || product) {
-          const costRes = await saveProductCost(
-            targetProductId,
-            cleanSupplier,
-            cleanOther,
-            costNotes
-          );
-          if (!costRes.success) {
-            toast.warning(`Product saved, but cost update failed: ${costRes.error}`);
+          const baseUnitCost = cleanTotalPieces > 0 ? cleanBatchCost / cleanTotalPieces : 0;
+          const totalOther =
+            cleanTotalPieces > 0 ? cleanBatchOther / cleanTotalPieces + cleanUnitOther : 0;
+
+          if (
+            cleanBatchCost > 0 ||
+            cleanBatchOther > 0 ||
+            cleanUnitOther > 0 ||
+            costNotes.trim() ||
+            product
+          ) {
+            const costRes = await saveProductCost(
+              targetProductId,
+              baseUnitCost,
+              totalOther,
+              costNotes,
+              {
+                costMode: "batch",
+                batchCost: cleanBatchCost,
+                packCount: cleanPackCount,
+                piecesPerPack: cleanPiecesPerPack,
+                totalPieces: cleanTotalPieces,
+                batchOtherCosts: cleanBatchOther,
+                unitOtherCosts: cleanUnitOther,
+              }
+            );
+            if (!costRes.success) {
+              toast.warning(`Product saved, but cost update failed: ${costRes.error}`);
+            }
+          }
+        } else {
+          const cleanSupplier = supplierCost.trim() ? Math.max(0, parseFloat(supplierCost) || 0) : 0;
+          const cleanOther = otherCosts.trim() ? Math.max(0, parseFloat(otherCosts) || 0) : 0;
+
+          if (cleanSupplier > 0 || cleanOther > 0 || costNotes.trim() || product) {
+            const costRes = await saveProductCost(
+              targetProductId,
+              cleanSupplier,
+              cleanOther,
+              costNotes,
+              { costMode: "unit" }
+            );
+            if (!costRes.success) {
+              toast.warning(`Product saved, but cost update failed: ${costRes.error}`);
+            }
           }
         }
       }
@@ -735,51 +918,215 @@ interface FormErrors {
                     {loadingCost && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-foreground">
-                        Supplier Cost (Private) (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={supplierCost}
-                        onChange={(e) => setSupplierCost(e.target.value)}
-                        placeholder="e.g. 40"
-                        className={cn(
-                          "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono font-bold outline-none focus:border-primary",
-                          errors.supplierCost ? "border-destructive ring-1 ring-destructive" : "border-input"
-                        )}
-                      />
-                      {errors.supplierCost && (
-                        <p className="mt-1 text-[11px] text-destructive">{errors.supplierCost}</p>
+                  {/* Mode Selector Toggle */}
+                  <div className="flex items-center gap-1.5 rounded-xl bg-card/80 p-1 border border-border/60">
+                    <button
+                      type="button"
+                      onClick={() => setCostMode("batch")}
+                      className={cn(
+                        "flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+                        costMode === "batch"
+                          ? "bg-emerald-600 text-white shadow-2xs"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
-                      <p className="mt-1 text-[10px] text-muted-foreground">Unit price paid to supplier / shop.</p>
-                    </div>
-
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-foreground">
-                        Other Costs (₹) <span className="text-muted-foreground font-normal">(Optional)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={otherCosts}
-                        onChange={(e) => setOtherCosts(e.target.value)}
-                        placeholder="e.g. 5"
-                        className={cn(
-                          "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono outline-none focus:border-primary",
-                          errors.otherCosts ? "border-destructive ring-1 ring-destructive" : "border-input"
-                        )}
-                      />
-                      {errors.otherCosts && (
-                        <p className="mt-1 text-[11px] text-destructive">{errors.otherCosts}</p>
+                    >
+                      Wholesale Batch / Packs
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCostMode("unit")}
+                      className={cn(
+                        "flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+                        costMode === "unit"
+                          ? "bg-emerald-600 text-white shadow-2xs"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
-                      <p className="mt-1 text-[10px] text-muted-foreground">Per-item packaging or transport.</p>
-                    </div>
+                    >
+                      Direct Per-Piece
+                    </button>
                   </div>
+
+                  {/* WHOLESALE BATCH MODE INPUTS */}
+                  {costMode === "batch" ? (
+                    <div className="space-y-3 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-foreground">
+                            Supplier Cost (Private) — Total Batch Purchase Cost (₹) <span className="text-destructive">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={batchCost}
+                            onChange={(e) => setBatchCost(e.target.value)}
+                            placeholder="e.g. 50"
+                            className={cn(
+                              "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono font-bold outline-none focus:border-primary",
+                              errors.batchCost ? "border-destructive ring-1 ring-destructive" : "border-input"
+                            )}
+                          />
+                          {errors.batchCost && (
+                            <p className="mt-1 text-[11px] text-destructive">{errors.batchCost}</p>
+                          )}
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Total invoice amount paid to supplier for all packs.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-foreground">
+                            Total Quantity in Selling Units (Pieces) <span className="text-destructive">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={totalPieces}
+                            onChange={(e) => handleTotalPiecesChange(e.target.value)}
+                            placeholder="e.g. 60"
+                            className={cn(
+                              "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono font-bold outline-none focus:border-primary",
+                              errors.totalPieces ? "border-destructive ring-1 ring-destructive" : "border-input"
+                            )}
+                          />
+                          {errors.totalPieces && (
+                            <p className="mt-1 text-[11px] text-destructive">{errors.totalPieces}</p>
+                          )}
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Individual selling pieces derived from batch.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Multipack breakdown calculator */}
+                      <div className="rounded-xl border border-border/60 bg-card/60 p-3">
+                        <p className="text-[11px] font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                          <Package className="size-3.5 text-primary" />
+                          <span>Pack Breakdown Calculator (Optional)</span>
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                              Packs Purchased
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={packCount}
+                              onChange={(e) => handlePackCountChange(e.target.value)}
+                              placeholder="e.g. 6"
+                              className="h-8 w-full rounded-xl border border-input bg-card px-2.5 text-xs font-mono outline-none focus:border-primary"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                              Pieces per Pack
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={piecesPerPack}
+                              onChange={(e) => handlePiecesPerPackChange(e.target.value)}
+                              placeholder="e.g. 10"
+                              className="h-8 w-full rounded-xl border border-input bg-card px-2.5 text-xs font-mono outline-none focus:border-primary"
+                            />
+                          </div>
+                        </div>
+                        {packCount && piecesPerPack && (
+                          <div className="mt-2 text-[10px] text-muted-foreground">
+                            Calculation: <strong>{packCount} packs × {piecesPerPack} pieces/pack = {parseFloat(packCount) * parseFloat(piecesPerPack)} pieces</strong>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Additional Expenses */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-foreground">
+                            Batch Additional Expenses (₹) <span className="text-muted-foreground font-normal">(Optional)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={batchOtherCosts}
+                            onChange={(e) => setBatchOtherCosts(e.target.value)}
+                            placeholder="e.g. 5"
+                            className="h-9 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono outline-none focus:border-primary"
+                          />
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Total batch shipping, freight, or courier cost.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-foreground">
+                            Per-Piece Additional Expenses (₹) <span className="text-muted-foreground font-normal">(Optional)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={unitOtherCosts}
+                            onChange={(e) => setUnitOtherCosts(e.target.value)}
+                            placeholder="e.g. 0.05"
+                            className="h-9 w-full rounded-xl border border-input bg-card px-3 text-xs font-mono outline-none focus:border-primary"
+                          />
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Individual packaging or pouch cost per unit.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* DIRECT UNIT COST MODE INPUTS (LEGACY / SINGLE PIECE) */
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-foreground">
+                          Supplier Cost (Private) (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={supplierCost}
+                          onChange={(e) => setSupplierCost(e.target.value)}
+                          placeholder="e.g. 40"
+                          className={cn(
+                            "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono font-bold outline-none focus:border-primary",
+                            errors.supplierCost ? "border-destructive ring-1 ring-destructive" : "border-input"
+                          )}
+                        />
+                        {errors.supplierCost && (
+                          <p className="mt-1 text-[11px] text-destructive">{errors.supplierCost}</p>
+                        )}
+                        <p className="mt-1 text-[10px] text-muted-foreground">Unit price paid to supplier / shop.</p>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-foreground">
+                          Other Costs (₹) <span className="text-muted-foreground font-normal">(Optional)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={otherCosts}
+                          onChange={(e) => setOtherCosts(e.target.value)}
+                          placeholder="e.g. 5"
+                          className={cn(
+                            "h-10 w-full rounded-xl border bg-card px-3 text-xs font-mono outline-none focus:border-primary",
+                            errors.otherCosts ? "border-destructive ring-1 ring-destructive" : "border-input"
+                          )}
+                        />
+                        {errors.otherCosts && (
+                          <p className="mt-1 text-[11px] text-destructive">{errors.otherCosts}</p>
+                        )}
+                        <p className="mt-1 text-[10px] text-muted-foreground">Per-item packaging or transport.</p>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="mb-1 block text-[11px] font-semibold text-muted-foreground">
@@ -794,63 +1141,122 @@ interface FormErrors {
                     />
                   </div>
 
-                  {/* Real-time Profit, Margin & Markup Calculation Metrics */}
-                  <div className="rounded-xl border border-border/80 bg-background/80 p-3 space-y-2">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                  {/* Real-time Profit, Margin & Wholesale Metrics Summary */}
+                  <div className="rounded-xl border border-border/80 bg-background/80 p-3 space-y-2.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-center">
+                      {/* 1. Purchase cost */}
                       <div className="p-2 rounded-lg bg-card border border-border/60">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Total Unit Cost</p>
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Purchase cost</p>
                         <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
-                          {formatINR(profitMetrics.totalCost)}
+                          {formatINR(costMode === "batch" ? (wholesaleMetrics?.batchCost ?? 0) : profitMetrics.supplierCost)}
+                          {costMode === "batch" && <span className="text-[10px] text-muted-foreground font-normal"> total</span>}
                         </p>
                       </div>
 
+                      {/* 2. Stock */}
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Stock</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {costMode === "batch" ? (wholesaleMetrics?.totalPieces ?? (parseInt(stock, 10) || 0)) : (parseInt(stock, 10) || 0)} pieces
+                        </p>
+                      </div>
+
+                      {/* 3. Cost per piece */}
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Cost per piece</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {formatINR(
+                            costMode === "batch"
+                              ? parseFloat((wholesaleMetrics?.baseUnitCost ?? 0).toFixed(2))
+                              : parseFloat((profitMetrics.supplierCost || 0).toFixed(2))
+                          )}
+                        </p>
+                      </div>
+
+                      {/* 4. Selling price */}
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Selling price</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {formatINR(priceNum || 0)} per piece
+                        </p>
+                      </div>
+
+                      {/* 5. Revenue if all stock sells */}
+                      <div className="p-2 rounded-lg bg-card border border-border/60">
+                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Revenue if all stock sells</p>
+                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
+                          {formatINR(costMode === "batch" ? (wholesaleMetrics?.totalRevenue ?? 0) : (priceNum || 0) * (parseInt(stock, 10) || 0))}
+                        </p>
+                      </div>
+
+                      {/* 6. Expected gross profit */}
                       <div
                         className={cn(
                           "p-2 rounded-lg border",
-                          profitMetrics.isLoss
+                          (wholesaleMetrics ? wholesaleMetrics.isLoss : profitMetrics.isLoss)
                             ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
                             : "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
                         )}
                       >
                         <p className="text-[10px] font-medium uppercase">
-                          {profitMetrics.isLoss ? "Estimated Loss" : "Estimated Profit"}
+                          {(wholesaleMetrics ? wholesaleMetrics.isLoss : profitMetrics.isLoss) ? "Estimated loss" : "Expected gross profit"}
                         </p>
                         <p className="mt-0.5 font-mono font-bold text-xs">
-                          {formatINR(Math.abs(profitMetrics.estimatedProfit))}
-                        </p>
-                      </div>
-
-                      <div
-                        className={cn(
-                          "p-2 rounded-lg border",
-                          profitMetrics.isLoss
-                            ? "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400"
-                            : "bg-primary/10 border-primary/20 text-primary"
-                        )}
-                      >
-                        <p className="text-[10px] font-medium uppercase">Profit Margin</p>
-                        <p className="mt-0.5 font-mono font-bold text-xs">
-                          {profitMetrics.profitMarginPct.toFixed(1)}%
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded-lg bg-card border border-border/60">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase">Markup</p>
-                        <p className="mt-0.5 font-mono font-bold text-xs text-foreground">
-                          {profitMetrics.markupPct.toFixed(1)}%
+                          {formatINR(Math.abs(costMode === "batch" ? (wholesaleMetrics?.totalGrossProfit ?? 0) : profitMetrics.estimatedProfit))}
                         </p>
                       </div>
                     </div>
 
-                    {profitMetrics.isLoss && (
-                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {/* Secondary Row: Profit margin, Per-piece profit, Markup & Optional Expenses */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+                        <span>
+                          Per-piece profit:{" "}
+                          <strong className={(wholesaleMetrics ? wholesaleMetrics.perPieceProfit < 0 : profitMetrics.estimatedProfit < 0) ? "text-rose-600" : "text-emerald-600"}>
+                            {formatINR(
+                              costMode === "batch"
+                                ? parseFloat((wholesaleMetrics?.perPieceProfit ?? 0).toFixed(2))
+                                : parseFloat((profitMetrics.estimatedProfit || 0).toFixed(2))
+                            )}
+                          </strong>
+                        </span>
+                        <span>•</span>
+                        <span>
+                          Gross profit margin:{" "}
+                          <strong className="text-foreground">
+                            {costMode === "batch"
+                              ? `${(wholesaleMetrics?.grossProfitMarginPct ?? 0).toFixed(2)}%`
+                              : `${profitMetrics.profitMarginPct.toFixed(1)}%`}
+                          </strong>
+                        </span>
+                        <span>•</span>
+                        <span>
+                          Markup:{" "}
+                          <strong className="text-foreground">
+                            {costMode === "batch"
+                              ? `${(wholesaleMetrics?.markupPct ?? 0).toFixed(1)}%`
+                              : `${profitMetrics.markupPct.toFixed(1)}%`}
+                          </strong>
+                        </span>
+                      </div>
+
+                      {costMode === "batch" && wholesaleMetrics && wholesaleMetrics.totalAdditionalCosts > 0 && (
+                        <div className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                          Additional costs: {formatINR(wholesaleMetrics.totalAdditionalCosts)} • Net profit: {formatINR(wholesaleMetrics.totalNetProfit)} ({wholesaleMetrics.netProfitMarginPct.toFixed(2)}% net margin)
+                        </div>
+                      )}
+                    </div>
+
+                    {(wholesaleMetrics ? wholesaleMetrics.isLoss : profitMetrics.isLoss) && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400 pt-1">
                         <AlertCircle className="size-3.5 shrink-0" />
                         <span>Warning: Selling price is lower than unit cost. This item operates at a loss!</span>
                       </div>
                     )}
 
-                    {profitMetrics.totalCost === 0 && (
-                      <p className="text-[10px] text-muted-foreground text-center italic">
+                    {((costMode === "batch" && (!wholesaleMetrics || wholesaleMetrics.batchCost === 0)) ||
+                      (costMode === "unit" && profitMetrics.totalCost === 0)) && (
+                      <p className="text-[10px] text-muted-foreground text-center italic pt-1">
                         Enter supplier cost above to see live profit margin and markup calculations.
                       </p>
                     )}

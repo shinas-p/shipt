@@ -300,11 +300,31 @@ export function QuickEditModal({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg bg-background/80 px-2.5 py-1.5 text-[11px] font-mono border border-border/60">
-                <span className="text-muted-foreground">Est. Profit / Margin:</span>
-                <span className={cn("font-bold", profitMetrics.isLoss ? "text-rose-600" : "text-emerald-600")}>
-                  {formatINR(profitMetrics.estimatedProfit)} ({profitMetrics.profitMarginPct.toFixed(1)}% margin)
-                </span>
+              <div className="space-y-1.5 rounded-lg bg-background/80 p-2 text-[11px] font-mono border border-border/60">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Cost per piece:</span>
+                  <span className="font-bold text-foreground">
+                    {formatINR(parseFloat(profitMetrics.supplierCost.toFixed(2)))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Revenue if all stock sells:</span>
+                  <span className="font-bold text-foreground">
+                    {formatINR((parseFloat(price) || 0) * (parseInt(stock, 10) || 0))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Expected gross profit:</span>
+                  <span className={cn("font-bold", profitMetrics.isLoss ? "text-rose-600" : "text-emerald-600")}>
+                    {formatINR(profitMetrics.estimatedProfit * (parseInt(stock, 10) || 0))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-t border-border/40 pt-1">
+                  <span className="text-muted-foreground">Est. Profit / Margin:</span>
+                  <span className={cn("font-bold", profitMetrics.isLoss ? "text-rose-600" : "text-emerald-600")}>
+                    {formatINR(profitMetrics.estimatedProfit)} ({profitMetrics.profitMarginPct.toFixed(1)}% margin)
+                  </span>
+                </div>
               </div>
             </div>
           )}
