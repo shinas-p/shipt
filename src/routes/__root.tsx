@@ -24,6 +24,7 @@ import { ProductDetailsModal } from "@/components/store/ProductDetailsModal";
 import { OpeningLogoAnimation } from "@/components/store/OpeningLogoAnimation";
 import { MaintenanceView } from "@/components/store/MaintenanceView";
 import { SuggestProductFab } from "@/components/store/SuggestProductFab";
+import { PwaInstallPrompt } from "@/components/pwa/PwaInstallPrompt";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -97,6 +98,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:description", content: "Shipt Mart: Fast and reliable delivery for snacks, stationery, personal care, and everyday essentials straight to your door." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "theme-color", content: "#15803d" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "apple-mobile-web-app-title", content: "ShipT" },
+      { name: "mobile-web-app-capable", content: "yes" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
@@ -134,6 +140,17 @@ function RootComponentContent() {
   const { isMaintenanceMode } = useMaintenance();
   const location = useLocation();
 
+  // Register single PWA & Web Push Service Worker safely on client mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/sw.js", { scope: "/" })
+        .catch((err) => {
+          console.warn("[ShipT PWA] Service worker registration error:", err);
+        });
+    }
+  }, []);
+
   const isBypassedRoute =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/accept-invitation") ||
@@ -167,6 +184,7 @@ function RootComponentContent() {
       <CartDrawer />
       <ProductDetailsModal />
       {!isFabHidden && <SuggestProductFab />}
+      <PwaInstallPrompt />
       <Toaster position="top-center" richColors />
     </>
   );

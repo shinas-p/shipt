@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { createAdminNotification } from "@/lib/notifications";
 
 export type SuggestionStatus = "pending" | "reviewed" | "approved" | "rejected";
 
@@ -186,11 +187,28 @@ export async function submitProductSuggestion(
       return { success: false, error: error.message };
     }
 
-    if (data) {
-      saveLocalSuggestion(data as ProductSuggestion);
+    const suggestionResult = data as ProductSuggestion;
+    if (suggestionResult) {
+      saveLocalSuggestion(suggestionResult);
     }
 
-    return { success: true, data: data as ProductSuggestion };
+    // Emit admin notification for customer suggestion (decoupled)
+    try {
+      await createAdminNotification({
+        event_type: "new_suggestion",
+        title: `New Product Suggestion: ${payload.product_name}`,
+        message: `${payload.customer_name} requested "${payload.product_name}" (${payload.category || "General"}). Expected quantity: ${payload.quantity}.`,
+        metadata: {
+          suggestion_id: suggestionResult.id,
+          product_name: payload.product_name,
+          category: payload.category,
+          customer_email: payload.customer_email,
+        },
+        dedup_key: `suggestion_created:${suggestionResult.id}`,
+      });
+    } catch {}
+
+    return { success: true, data: suggestionResult };
   } catch (err: any) {
     return { success: false, error: err?.message || "Failed to submit suggestion" };
   }

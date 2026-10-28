@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Phone, Mail, MessageCircle } from "lucide-react";
+import { Phone, Mail, MessageCircle, Instagram, Facebook } from "lucide-react";
 import { categories } from "@/data/products";
 import { useStore } from "@/lib/store";
 import { useBranding } from "@/lib/branding";
 import { useStoreContact } from "@/lib/contact";
+import { useSocialLinks } from "@/lib/social";
 import { Logo } from "./Header";
 
 const soon = (name: string) => () => toast(`${name} — page coming soon`);
@@ -13,6 +14,7 @@ export function Footer() {
   const { setCategory } = useStore();
   const { branding } = useBranding();
   const { contact } = useStoreContact();
+  const { socialLinks } = useSocialLinks();
   const futurePolicies = [
     "My Orders",
     "Help centre",
@@ -61,6 +63,51 @@ export function Footer() {
               </a>
             </div>
           </div>
+
+          {/* Configurable Social Media Links (Hidden when not configured) */}
+          {(socialLinks.whatsapp || socialLinks.instagram || socialLinks.facebook) && (
+            <div className="space-y-1.5 pt-2 text-xs text-muted-foreground border-t border-border/40">
+              <p className="font-semibold text-foreground">Follow Us & Updates:</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {socialLinks.whatsapp && (
+                  <a
+                    href={socialLinks.whatsapp}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Follow our WhatsApp Channel"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/50 px-2.5 py-1 text-xs hover:text-emerald-600 hover:border-emerald-500/40 transition"
+                  >
+                    <MessageCircle className="size-3.5 text-emerald-600" />
+                    <span>WhatsApp Channel</span>
+                  </a>
+                )}
+                {socialLinks.instagram && (
+                  <a
+                    href={socialLinks.instagram}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Follow us on Instagram"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/50 px-2.5 py-1 text-xs hover:text-pink-600 hover:border-pink-500/40 transition"
+                  >
+                    <Instagram className="size-3.5 text-pink-600" />
+                    <span>Instagram</span>
+                  </a>
+                )}
+                {socialLinks.facebook && (
+                  <a
+                    href={socialLinks.facebook}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Follow us on Facebook"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/50 px-2.5 py-1 text-xs hover:text-blue-600 hover:border-blue-500/40 transition"
+                  >
+                    <Facebook className="size-3.5 text-blue-600" />
+                    <span>Facebook</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div>

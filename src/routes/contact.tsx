@@ -10,10 +10,14 @@ import {
   Clock,
   Sparkles,
   ExternalLink,
+  Instagram,
+  Facebook,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBranding } from "@/lib/branding";
 import { useStoreContact } from "@/lib/contact";
+import { useSocialLinks } from "@/lib/social";
 import { STORE_CONTACT, getWhatsAppChatLink } from "@/data/contact";
 
 export const Route = createFileRoute("/contact")({
@@ -39,6 +43,7 @@ export const Route = createFileRoute("/contact")({
 export function ContactPage() {
   const { branding } = useBranding();
   const { contact } = useStoreContact();
+  const { socialLinks } = useSocialLinks();
 
   return (
     <div className="min-h-screen bg-background py-8 sm:py-12">
@@ -147,6 +152,95 @@ export function ContactPage() {
             </div>
           </div>
         </div>
+
+        {/* Configurable Social Media Section (Hidden when unconfigured) */}
+        {(socialLinks.whatsapp || socialLinks.instagram || socialLinks.facebook) && (
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8 space-y-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 text-xs font-bold text-primary">
+                <Share2 className="size-3.5" />
+                <span>Follow & Connect</span>
+              </div>
+              <h3 className="font-display text-lg font-bold text-foreground">
+                Join our Campus Community
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Stay updated with the latest product arrivals, flash offers, and store announcements across our official channels.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 pt-2">
+              {socialLinks.whatsapp && (
+                <a
+                  href={socialLinks.whatsapp}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Join our WhatsApp Channel"
+                  className="flex items-center justify-between rounded-2xl border border-border/80 bg-background/50 p-4 transition hover:border-emerald-500/50 hover:bg-emerald-500/5 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600">
+                      <MessageCircle className="size-5" />
+                    </div>
+                    <div>
+                      <p className="font-display text-xs font-bold text-foreground group-hover:text-emerald-600 transition">
+                        WhatsApp Channel
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">Daily drops & alerts</p>
+                    </div>
+                  </div>
+                  <ExternalLink className="size-4 text-muted-foreground group-hover:text-emerald-600 transition" />
+                </a>
+              )}
+
+              {socialLinks.instagram && (
+                <a
+                  href={socialLinks.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Follow us on Instagram"
+                  className="flex items-center justify-between rounded-2xl border border-border/80 bg-background/50 p-4 transition hover:border-pink-500/50 hover:bg-pink-500/5 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl bg-pink-500/10 text-pink-600">
+                      <Instagram className="size-5" />
+                    </div>
+                    <div>
+                      <p className="font-display text-xs font-bold text-foreground group-hover:text-pink-600 transition">
+                        Instagram
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">Stories & sneak peeks</p>
+                    </div>
+                  </div>
+                  <ExternalLink className="size-4 text-muted-foreground group-hover:text-pink-600 transition" />
+                </a>
+              )}
+
+              {socialLinks.facebook && (
+                <a
+                  href={socialLinks.facebook}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Follow us on Facebook"
+                  className="flex items-center justify-between rounded-2xl border border-border/80 bg-background/50 p-4 transition hover:border-blue-500/50 hover:bg-blue-500/5 group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl bg-blue-500/10 text-blue-600">
+                      <Facebook className="size-5" />
+                    </div>
+                    <div>
+                      <p className="font-display text-xs font-bold text-foreground group-hover:text-blue-600 transition">
+                        Facebook
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">Community & updates</p>
+                    </div>
+                  </div>
+                  <ExternalLink className="size-4 text-muted-foreground group-hover:text-blue-600 transition" />
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Suggestion & Quick Action Card */}
         <div className="rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6">

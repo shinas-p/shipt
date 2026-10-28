@@ -50,6 +50,7 @@ import {
   Lightbulb,
   ArrowLeft,
   SlidersHorizontal,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +69,9 @@ import { BlockManagementTab } from "@/components/admin/BlockManagementTab";
 import { MaintenanceModeTab } from "@/components/admin/MaintenanceModeTab";
 import { ProductSuggestionsTab } from "@/components/admin/ProductSuggestionsTab";
 import { ContactSettingsView } from "@/components/admin/ContactSettingsView";
+import { SocialSettingsView } from "@/components/admin/SocialSettingsView";
+import { AdminNotificationBell } from "@/components/admin/AdminNotificationBell";
+import { createAdminNotification } from "@/lib/notifications";
 import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
 import { TabVisibilitySettingsView } from "@/components/admin/TabVisibilitySettingsView";
 import { TabVisibilitySettingsSection } from "@/components/admin/TabVisibilitySettingsSection";
@@ -311,6 +315,7 @@ function AdminPortalInner() {
       { id: "hub", label: "Overview", icon: LayoutGrid },
       { id: "branding", label: "Store Branding", icon: Sparkles },
       { id: "contact", label: "Contact Info", icon: Phone },
+      { id: "social", label: "Social Links", icon: Share2 },
       { id: "tab_visibility", label: "Tab Visibility", icon: SlidersHorizontal },
       { id: "banners", label: "Promotional Banners", icon: ImageIcon },
       {
@@ -448,6 +453,14 @@ function AdminPortalInner() {
       return true;
     });
   }, [scopedOrders, orderFilter, orderBlockFilter]);
+
+  const handleNotificationSelectOrder = useCallback((orderId: string, orderNumber?: string | null) => {
+    setActiveTab("orders");
+    const match = orders.find((o) => o.id === orderId || (orderNumber && o.order_number === orderNumber));
+    if (match) {
+      setSelectedAdminOrder(match);
+    }
+  }, [orders]);
 
   const filteredProducts = useMemo(() => {
     return dbProducts.filter((p) => {
@@ -961,6 +974,25 @@ function AdminPortalInner() {
 
       toast.success(`Order status updated to ${newStatus.replace(/_/g, " ")}`);
       setStatusUpdateNotes("");
+
+      if (newStatus === "cancelled") {
+        const orderToCancel = orders.find((o) => o.id === orderId);
+        try {
+          await createAdminNotification({
+            order_id: orderId,
+            order_number: orderToCancel?.order_number || null,
+            event_type: "order_cancelled",
+            title: `Order #${orderToCancel?.order_number || "Unknown"} Cancelled`,
+            message: `Order was cancelled (${defaultNotes}). Items have been returned to warehouse stock.`,
+            metadata: {
+              order_id: orderId,
+              order_number: orderToCancel?.order_number,
+              previous_status: orderToCancel?.status,
+            },
+            dedup_key: `order_cancelled:${orderId}:${Date.now()}`,
+          });
+        } catch {}
+      }
 
       // Reload orders and update the open modal view with fresh DB record
       const freshOrders = await loadOrders();
@@ -1773,6 +1805,7 @@ function AdminPortalInner() {
         </div>
 
         <div className="flex items-center gap-2">
+          <AdminNotificationBell onSelectOrder={handleNotificationSelectOrder} />
           <Button asChild variant="outline" size="sm" className="h-9">
             <Link to="/">View Storefront</Link>
           </Button>
@@ -3422,6 +3455,13 @@ function AdminPortalInner() {
 
           {settingsSubView === "contact" && (
             <ContactSettingsView
+              adminRole={adminRole}
+              onBackToDashboard={() => setSettingsSubView("hub")}
+            />
+          )}
+
+          {settingsSubView === "social" && (
+            <SocialSettingsView
               adminRole={adminRole}
               onBackToDashboard={() => setSettingsSubView("hub")}
             />

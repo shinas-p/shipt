@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { categories as defaultCategories, products as defaultProducts } from "@/data/products";
 import type { Category, Product, CategoryId, CheckoutFormData, CartItem, PlacedOrderResult, TrackedOrder, DeliveryBlock } from "@/lib/types";
+import { createAdminNotification } from "@/lib/notifications";
 
 import promoFallback from "@/assets/promo.jpg";
 
@@ -221,17 +222,42 @@ export async function placeOrder(
       .toString(36)
       .substring(2, 8)
       .toUpperCase()}`;
+    const mockOrderId = "demo-" + Math.random().toString(36).substring(2, 9);
+    const demoTotal = cart.reduce((acc, c) => {
+      const p = defaultProducts.find((item) => item.id === c.productId);
+      return acc + ((p?.price || 0) * c.quantity);
+    }, 0);
+
+    const demoResult: PlacedOrderResult = {
+      order_id: mockOrderId,
+      order_number: mockOrderNumber,
+      guest_tracking_token: "demo_token_" + Math.random().toString(36).substring(2, 10),
+      total_amount: demoTotal,
+      status: "placed",
+      payment_method: form.payment,
+      payment_status: "pending",
+    };
+
+    try {
+      await createAdminNotification({
+        order_id: demoResult.order_id,
+        order_number: demoResult.order_number,
+        event_type: "new_order",
+        title: `New Order #${demoResult.order_number}`,
+        message: `Order received for ₹${demoResult.total_amount} via ${payload.delivery_method === "hostel_delivery" ? `Hostel Delivery (${payload.delivery_block_id || "Campus"})` : "Campus Pickup"}.`,
+        metadata: {
+          total_amount: demoResult.total_amount,
+          delivery_method: payload.delivery_method,
+          delivery_block_id: payload.delivery_block_id,
+          payment_method: payload.payment_method,
+        },
+        dedup_key: `order_created:${demoResult.order_id}`,
+      });
+    } catch { }
+
     return {
       success: true,
-      data: {
-        order_id: "demo-" + Math.random().toString(36).substring(2, 9),
-        order_number: mockOrderNumber,
-        guest_tracking_token: "demo_token_" + Math.random().toString(36).substring(2, 10),
-        total_amount: 0,
-        status: "placed",
-        payment_method: form.payment,
-        payment_status: "pending",
-      },
+      data: demoResult,
     };
   }
 
@@ -244,9 +270,31 @@ export async function placeOrder(
       return { success: false, error: error.message };
     }
 
+    const orderResult = data as PlacedOrderResult;
+
+    // Idempotent admin notification emission (decoupled from order transaction)
+    try {
+      await createAdminNotification({
+        order_id: orderResult.order_id,
+        order_number: orderResult.order_number,
+        event_type: "new_order",
+        title: `New Order #${orderResult.order_number}`,
+        message: `Order received for ₹${orderResult.total_amount} via ${payload.delivery_method === "hostel_delivery" ? `Hostel Delivery (${payload.delivery_block_id || "Campus"})` : "Campus Pickup"}.`,
+        metadata: {
+          total_amount: orderResult.total_amount,
+          delivery_method: payload.delivery_method,
+          delivery_block_id: payload.delivery_block_id,
+          payment_method: payload.payment_method,
+        },
+        dedup_key: `order_created:${orderResult.order_id}`,
+      });
+    } catch {
+      // Notification error must NEVER undo or disrupt successful order placement
+    }
+
     return {
       success: true,
-      data: data as PlacedOrderResult,
+      data: orderResult,
     };
   } catch (err: any) {
     return { success: false, error: err?.message || "Failed to place order. Please try again." };

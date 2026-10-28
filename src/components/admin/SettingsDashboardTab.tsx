@@ -11,12 +11,14 @@ import {
   CheckCircle2,
   Lock,
   SlidersHorizontal,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMaintenance } from "@/lib/maintenance";
 import { useBranding } from "@/lib/branding";
 import { useStoreContact } from "@/lib/contact";
+import { useSocialLinks } from "@/lib/social";
 import {
   canManageMaintenance,
   canManageContact,
@@ -24,6 +26,7 @@ import {
   canManageSuggestions,
   canManageBanners,
   canManageRoles,
+  canAccessSettings,
   getRoleBadge,
   type AdminRole,
 } from "@/lib/permissions";
@@ -33,6 +36,7 @@ export type SettingsSubView =
   | "hub"
   | "branding"
   | "contact"
+  | "social"
   | "suggestions"
   | "maintenance"
   | "banners"
@@ -52,6 +56,7 @@ export function SettingsDashboardTab({
 }: SettingsDashboardTabProps) {
   const { branding } = useBranding();
   const { contact } = useStoreContact();
+  const { socialLinks } = useSocialLinks();
   const { isMaintenanceMode } = useMaintenance();
 
   const isSuperAdmin = adminRole === "super_admin";
@@ -142,6 +147,22 @@ export function SettingsDashboardTab({
       authorized: true, // Super Admin edits, others view
       targetView: "contact" as SettingsSubView,
       badge: isSuperAdmin ? "Super Admin" : "Read Only",
+    },
+    {
+      id: "social",
+      title: "Social Media Links",
+      icon: Share2,
+      iconColor: "text-pink-600 bg-pink-500/10",
+      description: "Manage official links for WhatsApp Channel, Instagram, and Facebook displayed on the storefront footer and Contact page.",
+      details: [
+        socialLinks.whatsapp ? "WhatsApp" : null,
+        socialLinks.instagram ? "Instagram" : null,
+        socialLinks.facebook ? "Facebook" : null,
+      ].filter(Boolean).join(" • ") || "No channels configured",
+      actionLabel: canAccessSettings(adminRole) ? "Manage Social Links" : "Restricted",
+      authorized: canAccessSettings(adminRole),
+      targetView: "social" as SettingsSubView,
+      badge: canAccessSettings(adminRole) ? "Super Admin & Owner" : "Restricted",
     },
   ];
 
