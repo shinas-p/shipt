@@ -3,8 +3,6 @@ import { toast } from "sonner";
 import type { CartItem, Category, CategoryId, Product } from "@/lib/types";
 import {
   categories as defaultCategories,
-  products as defaultProducts,
-  getProduct as defaultGetProduct,
   SEED_UUID_TO_SLUG,
   SLUG_TO_SEED_UUID,
 } from "@/data/products";
@@ -43,15 +41,17 @@ interface StoreCtx {
   categories: Category[];
   getProduct: (id: string) => Product | undefined;
   isLoadingCatalog: boolean;
+  catalogError: string | null;
   refreshCatalog: () => Promise<void>;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [products, setProducts] = useState<Product[]>(defaultProducts);
+  const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>(defaultCategories);
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<string[]>([]);
@@ -63,12 +63,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const refreshCatalog = useCallback(async () => {
     setIsLoadingCatalog(true);
+    setCatalogError(null);
     try {
       const [cats, prods] = await Promise.all([loadCategories(), loadProducts()]);
       if (cats && cats.length > 0) setCategories(cats);
-      if (prods && prods.length > 0) setProducts(prods);
-    } catch {
-      // Keep existing default catalog
+      // Strictly set products even if empty array [] (e.g. all products archived)
+      setProducts(prods || []);
+      setCatalogError(null);
+    } catch (err: any) {
+      setCatalogError(err?.message || "Failed to load store products.");
     } finally {
       setIsLoadingCatalog(false);
     }
@@ -77,6 +80,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshCatalog();
   }, [refreshCatalog]);
+
+  // If active product modal belongs to a product that was archived, dismiss it
+  useEffect(() => {
+    if (detail && !products.some((p) => p.id === detail.id || (p.slug && p.slug === detail.slug))) {
+      setDetail(null);
+    }
+  }, [products, detail]);
 
   useEffect(() => {
     try {
@@ -119,8 +129,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const mappedSlug = SEED_UUID_TO_SLUG[lower];
       const mappedUuid = SLUG_TO_SEED_UUID[lower];
 
-      // 1. Search in current active products catalog (e.g. Supabase DB or updated local)
-      const foundInState = products.find(
+      // Search ONLY in current active products catalog (non-archived products)
+      return products.find(
         (p) =>
           p.id === id ||
           p.id.toLowerCase() === lower ||
@@ -128,10 +138,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           (mappedSlug && (p.slug === mappedSlug || p.id === mappedSlug)) ||
           (mappedUuid && (p.id === mappedUuid || p.slug === mappedUuid))
       );
-      if (foundInState) return foundInState;
-
-      // 2. Search fallback default products (handles offline, boot timing, and seed items)
-      return defaultGetProduct(id);
     },
     [products]
   );
@@ -225,7 +231,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     return {
       cart,
-      itemCount: cart.reduce((s, c) => s + c.quantity, 0),
+      itemCount: cart.reduce((s, c) => (getProduct(c.productId) ? s + c.quantity : s), 0),
       subtotal: cart.reduce((s, c) => s + (getProduct(c.productId)?.price ?? 0) * c.quantity, 0),
       qtyOf,
       setQty,
@@ -257,6 +263,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       categories,
       getProduct,
       isLoadingCatalog,
+      catalogError,
       refreshCatalog,
     };
   }, [
@@ -275,6 +282,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     categories,
     getProduct,
     isLoadingCatalog,
+    catalogError,
     refreshCatalog,
   ]);
 
@@ -304,10 +312,11 @@ const defaultStoreValue: StoreCtx = {
   setCategory: () => {},
   detail: null,
   setDetail: () => {},
-  products: defaultProducts,
+  products: [],
   categories: defaultCategories,
-  getProduct: (id) => defaultGetProduct(id),
+  getProduct: () => undefined,
   isLoadingCatalog: false,
+  catalogError: null,
   refreshCatalog: async () => {},
 };
 

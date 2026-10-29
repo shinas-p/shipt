@@ -93,67 +93,70 @@ export async function loadCategories(): Promise<Category[]> {
 }
 
 /**
- * Loads products from Supabase with graceful fallback to default products
+ * Loads products from Supabase.
+ * Returns only active products (is_active = true).
+ * When all products are archived or store is empty, returns an empty array [].
+ * Throws on network or database errors so callers can distinguish errors from an empty catalog.
  */
 export async function loadProducts(): Promise<Product[]> {
   if (!isSupabaseConfigured) {
-    return defaultProducts;
+    return [];
   }
 
-  try {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("is_active", true)
-      .order("display_order", { ascending: true });
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("is_active", true)
+    .order("display_order", { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      return defaultProducts;
+  if (error) {
+    throw new Error(error.message || "Failed to load products from store database.");
+  }
+
+  if (!data || data.length === 0) {
+    return [];
+  }
+
+  return data.map((p) => {
+    // Resolve product image:
+    // 1. If an admin uploaded an image to Supabase Storage or specified a custom URL, prioritize it
+    let imageSrc = "";
+    if (
+      p.image_url &&
+      (p.image_url.startsWith("http") || p.image_url.startsWith("/")) &&
+      !p.image_url.includes("/storage/v1/object/public/posters/p-")
+    ) {
+      imageSrc = p.image_url;
     }
 
-    return data.map((p) => {
-      // Resolve product image:
-      // 1. If an admin uploaded an image to Supabase Storage or specified a custom URL, prioritize it
-      let imageSrc = "";
-      if (
-        p.image_url &&
-        (p.image_url.startsWith("http") || p.image_url.startsWith("/")) &&
-        !p.image_url.includes("/storage/v1/object/public/posters/p-")
-      ) {
-        imageSrc = p.image_url;
-      }
+    // 2. Fall back to bundled catalog assets for initial catalogue items
+    if (!imageSrc) {
+      imageSrc = (p.slug && localImageMap[p.slug]) || (p.id && localImageMap[p.id]) || "";
+    }
 
-      // 2. Fall back to bundled catalog assets for initial catalogue items
-      if (!imageSrc) {
-        imageSrc = (p.slug && localImageMap[p.slug]) || (p.id && localImageMap[p.id]) || "";
-      }
+    // 3. Fall back to clean branded SVG fallback
+    if (!imageSrc) {
+      imageSrc = BRAND_FALLBACK_IMAGE;
+    }
 
-      // 3. Fall back to clean branded SVG fallback
-      if (!imageSrc) {
-        imageSrc = BRAND_FALLBACK_IMAGE;
-      }
-
-      const prod: Product = {
-        id: p.id,
-        name: p.name,
-        size: p.size,
-        description: p.description || "",
-        price: Number(p.price),
-        category: p.category_id as CategoryId,
-        image: imageSrc,
-        stock: p.stock ?? 0,
-        bestseller: Boolean(p.bestseller),
-        isNew: Boolean(p.is_new),
-        slug: p.slug || undefined,
-      };
-      if (p.original_price != null) {
-        prod.originalPrice = Number(p.original_price);
-      }
-      return prod;
-    });
-  } catch {
-    return defaultProducts;
-  }
+    const prod: Product = {
+      id: p.id,
+      name: p.name,
+      size: p.size,
+      description: p.description || "",
+      price: Number(p.price),
+      category: p.category_id as CategoryId,
+      image: imageSrc,
+      stock: p.stock ?? 0,
+      bestseller: Boolean(p.bestseller),
+      isNew: Boolean(p.is_new),
+      slug: p.slug || undefined,
+    };
+    if (p.original_price != null) {
+      prod.originalPrice = Number(p.original_price);
+    }
+    return prod;
+  });
 }
 
 /**

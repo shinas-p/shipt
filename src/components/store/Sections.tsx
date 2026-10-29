@@ -1,4 +1,4 @@
-import { BookOpen, Check, Cookie, Cpu, Home, LayoutGrid, PencilLine, RotateCcw, Search, Sparkles } from "lucide-react";
+import { AlertCircle, BookOpen, Check, Cookie, Cpu, Home, LayoutGrid, Package, PencilLine, RotateCcw, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { CategoryId } from "@/lib/types";
 import { useStore } from "@/lib/store";
@@ -19,7 +19,10 @@ type SortOption = "popular" | "price-asc" | "price-desc" | "name";
 type FilterOption = "all" | "in-stock" | "bestseller" | "new";
 
 export function CategoryGrid() {
-  const { category, setCategory, categories } = useStore();
+  const { category, setCategory, categories, products } = useStore();
+
+  // If there are no active products in the store, hide the category bar to keep storefront clean
+  if (products.length === 0) return null;
 
   return (
     <section id="categories" className="container-page py-3 sm:py-4">
@@ -91,7 +94,17 @@ export function CategoryGrid() {
 }
 
 export function ProductGrid() {
-  const { search, category, setCategory, setSearch, products, categories, isLoadingCatalog } = useStore();
+  const {
+    search,
+    category,
+    setCategory,
+    setSearch,
+    products,
+    categories,
+    isLoadingCatalog,
+    catalogError,
+    refreshCatalog,
+  } = useStore();
   const [sortBy, setSortBy] = useState<SortOption>("popular");
   const [filterBy, setFilterBy] = useState<FilterOption>("all");
 
@@ -122,6 +135,76 @@ export function ProductGrid() {
   }, [products, search, category, filterBy, sortBy]);
 
   const activeCategoryObj = categories.find((c) => c.id === category);
+
+  // 1. Error state when fetching products fails
+  if (catalogError && products.length === 0) {
+    return (
+      <section id="shop" className="container-page scroll-mt-24 py-8 sm:py-12">
+        <div className="flex flex-col items-center rounded-3xl border border-destructive/30 bg-destructive/5 p-8 text-center sm:p-12">
+          <span className="grid size-14 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+            <AlertCircle className="size-7" />
+          </span>
+          <h3 className="mt-4 font-display text-xl font-bold text-foreground sm:text-2xl">
+            Unable to load store products
+          </h3>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">
+            {catalogError}
+          </p>
+          <Button
+            variant="default"
+            size="lg"
+            onClick={() => refreshCatalog()}
+            className="mt-6 gap-2 rounded-full font-semibold shadow-sm"
+          >
+            <RotateCcw className="size-4" />
+            <span>Retry</span>
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
+  // 2. Loading state on cold start
+  if (isLoadingCatalog && products.length === 0) {
+    return (
+      <section id="shop" className="container-page scroll-mt-24 py-8 sm:py-12">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <div key={i} className="h-64 rounded-2xl bg-muted/60 animate-pulse" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  // 3. Clean branded empty state when all products are archived or store has zero products
+  if (!isLoadingCatalog && products.length === 0) {
+    return (
+      <section id="shop" className="container-page scroll-mt-24 py-10 sm:py-16">
+        <div className="flex flex-col items-center rounded-3xl border border-border/70 bg-card p-8 text-center sm:p-14 shadow-xs">
+          <span className="grid size-16 place-items-center rounded-3xl bg-primary/10 text-primary">
+            <Package className="size-8" />
+          </span>
+          <h3 className="mt-5 font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            No products available right now
+          </h3>
+          <p className="mt-2 max-w-md text-sm text-muted-foreground sm:text-base">
+            Please check back soon. We're updating our store.
+          </p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <Button
+              variant="default"
+              onClick={() => refreshCatalog()}
+              className="gap-2 rounded-full font-semibold px-6 shadow-sm"
+            >
+              <RotateCcw className="size-4" />
+              <span>Refresh Store</span>
+            </Button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const headingText = search
     ? `Results for “${search}”`
@@ -240,29 +323,55 @@ export function ProductGrid() {
 
       {/* Product List or Empty State */}
       {filteredProducts.length === 0 ? (
-        <div className="my-8 flex flex-col items-center rounded-2xl border border-dashed border-border bg-card p-8 text-center sm:p-12">
-          <span className="grid size-12 place-items-center rounded-full bg-secondary text-primary">
-            <Search className="size-5" />
-          </span>
-          <h3 className="mt-3 text-base font-bold sm:text-lg">No matching products found</h3>
-          <p className="mt-1 max-w-sm text-xs text-muted-foreground sm:text-sm">
-            Try adjusting your search terms, changing the category, or clearing active filters.
-          </p>
-          <div className="mt-4 flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSearch("");
-                setCategory("all");
-                setFilterBy("all");
-              }}
-              className="gap-1.5"
-            >
-              <RotateCcw className="size-3.5" /> Reset all filters
-            </Button>
+        category !== "all" && !search.trim() ? (
+          /* Category-Specific Empty State */
+          <div className="my-8 flex flex-col items-center rounded-2xl border border-dashed border-border bg-card p-8 text-center sm:p-12">
+            <span className="grid size-12 place-items-center rounded-full bg-secondary text-primary">
+              <Package className="size-5" />
+            </span>
+            <h3 className="mt-3 text-base font-bold sm:text-lg">
+              No products available in {activeCategoryObj?.name || "this category"}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-muted-foreground sm:text-sm">
+              We don't have any items in this category right now. Check back soon or explore other essentials.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCategory("all")}
+                className="gap-1.5 rounded-full font-semibold"
+              >
+                <LayoutGrid className="size-3.5" /> View all products
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : (
+          /* Search or Filter Empty State */
+          <div className="my-8 flex flex-col items-center rounded-2xl border border-dashed border-border bg-card p-8 text-center sm:p-12">
+            <span className="grid size-12 place-items-center rounded-full bg-secondary text-primary">
+              <Search className="size-5" />
+            </span>
+            <h3 className="mt-3 text-base font-bold sm:text-lg">No matching products found</h3>
+            <p className="mt-1 max-w-sm text-xs text-muted-foreground sm:text-sm">
+              Try adjusting your search terms, changing the category, or clearing active filters.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearch("");
+                  setCategory("all");
+                  setFilterBy("all");
+                }}
+                className="gap-1.5"
+              >
+                <RotateCcw className="size-3.5" /> Reset all filters
+              </Button>
+            </div>
+          </div>
+        )
       ) : (
         <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredProducts.map((p) => (

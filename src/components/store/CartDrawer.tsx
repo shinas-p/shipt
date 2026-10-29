@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ShoppingBag, Trash2 } from "lucide-react";
+import { AlertTriangle, ShoppingBag, Trash2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
@@ -9,6 +9,8 @@ import { QuantitySelector } from "./QuantitySelector";
 
 export function CartDrawer() {
   const { cart, cartOpen, setCartOpen, itemCount, subtotal, setQty, remove, getProduct } = useStore();
+  const hasUnavailable = cart.some((c) => !getProduct(c.productId));
+
   return (
     <Sheet open={cartOpen} onOpenChange={setCartOpen}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
@@ -28,7 +30,32 @@ export function CartDrawer() {
             <ul className="flex-1 divide-y divide-border overflow-y-auto px-5">
               {cart.map((c) => {
                 const p = getProduct(c.productId);
-                if (!p) return null;
+                if (!p) {
+                  return (
+                    <li key={c.productId} className="flex gap-3 py-3 my-1 rounded-xl bg-destructive/5 px-2.5 border border-destructive/20">
+                      <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-destructive/10 text-destructive">
+                        <AlertTriangle className="size-5" />
+                      </div>
+                      <div className="flex min-w-0 flex-1 flex-col justify-between">
+                        <div className="flex justify-between gap-1">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-foreground">Unavailable item</p>
+                            <p className="text-[11px] text-destructive">Archived or no longer in catalog</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => remove(c.productId)}
+                            className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-destructive"
+                            aria-label="Remove unavailable item"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                }
+
                 return (
                   <li key={c.productId} className="flex gap-3 py-4">
                     <img
@@ -59,12 +86,26 @@ export function CartDrawer() {
               })}
             </ul>
             <div className="border-t border-border bg-secondary/50 p-5 space-y-2">
+              {hasUnavailable && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive">
+                  Please remove unavailable items before proceeding to checkout.
+                </div>
+              )}
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Items</span><span className="font-semibold">{itemCount}</span></div>
               <div className="mt-1 flex justify-between text-lg font-bold"><span>Subtotal</span><span className="text-primary">{formatINR(subtotal)}</span></div>
               <p className="text-xs text-muted-foreground">Delivered directly to your doorstep.</p>
               <div className="pt-2 space-y-2">
-                <Button asChild variant="hero" className="h-11 w-full text-sm font-bold">
-                  <Link to="/checkout" onClick={() => setCartOpen(false)}>Proceed to Checkout</Link>
+                <Button
+                  asChild={!hasUnavailable}
+                  variant="hero"
+                  disabled={hasUnavailable}
+                  className="h-11 w-full text-sm font-bold"
+                >
+                  {hasUnavailable ? (
+                    <span>Remove Unavailable Items</span>
+                  ) : (
+                    <Link to="/checkout" onClick={() => setCartOpen(false)}>Proceed to Checkout</Link>
+                  )}
                 </Button>
                 <Button asChild variant="outline" className="h-10 w-full text-xs font-semibold">
                   <Link to="/cart" onClick={() => setCartOpen(false)}>View Full Cart</Link>

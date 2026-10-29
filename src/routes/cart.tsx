@@ -74,6 +74,7 @@ function CartPage() {
   };
 
   const savedProducts = savedWishlistProducts;
+  const hasUnavailable = cart.some((c) => !getProduct(c.productId));
 
   return (
     <div className="container-page py-6 md:py-10">
@@ -132,7 +133,39 @@ function CartPage() {
             <div className="rounded-3xl border border-border bg-card p-4 sm:p-6 shadow-xs divide-y divide-border/60">
               {cart.map((item) => {
                 const product = getProduct(item.productId);
-                if (!product) return null;
+                if (!product) {
+                  return (
+                    <div key={item.productId} className="flex flex-col gap-4 py-5 first:pt-1 last:pb-1 sm:flex-row sm:items-center bg-destructive/5 rounded-2xl p-4 my-2 border border-destructive/20">
+                      <div className="size-20 shrink-0 rounded-2xl bg-destructive/10 grid place-items-center text-destructive sm:size-24">
+                        <AlertTriangle className="size-8" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="inline-block rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-destructive">
+                              Archived / Unavailable
+                            </span>
+                            <h3 className="font-display text-base font-bold text-foreground leading-snug mt-1">
+                              Unavailable Product
+                            </h3>
+                            <p className="text-xs text-muted-foreground">This product was archived and is no longer purchasable.</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between border-t border-border/40 pt-3">
+                          <span className="text-xs text-destructive font-medium">Please remove to continue checkout</span>
+                          <button
+                            type="button"
+                            onClick={() => remove(item.productId)}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-destructive hover:underline"
+                          >
+                            <Trash2 className="size-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
 
                 const isOutOfStock = product.stock === 0;
                 const isLowStock = product.stock > 0 && product.stock <= 5;
@@ -257,12 +290,27 @@ function CartPage() {
                 </div>
               </div>
 
+              {hasUnavailable && (
+                <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                  Please remove archived or unavailable items before proceeding to checkout.
+                </div>
+              )}
+
               <div className="mt-6 space-y-3">
-                <Button asChild variant="hero" className="w-full h-12 text-sm font-bold shadow-md">
-                  <Link to="/checkout">
-                    <span>Proceed to Checkout</span>
-                    <ArrowRight className="ml-1.5 size-4" />
-                  </Link>
+                <Button
+                  asChild={!hasUnavailable}
+                  variant="hero"
+                  disabled={hasUnavailable}
+                  className="w-full h-12 text-sm font-bold shadow-md"
+                >
+                  {hasUnavailable ? (
+                    <span>Remove Unavailable Items</span>
+                  ) : (
+                    <Link to="/checkout">
+                      <span>Proceed to Checkout</span>
+                      <ArrowRight className="ml-1.5 size-4" />
+                    </Link>
+                  )}
                 </Button>
 
                 <Button asChild variant="outline" className="w-full h-10 text-xs">

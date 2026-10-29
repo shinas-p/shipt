@@ -17,10 +17,10 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-// Mock catalogApi to avoid external network calls while keeping default products
+// Mock catalogApi to avoid external network calls while providing test products
 vi.mock("@/lib/catalogApi", () => ({
   loadCategories: vi.fn().mockResolvedValue([]),
-  loadProducts: vi.fn().mockResolvedValue([]),
+  loadProducts: vi.fn().mockImplementation(async () => defaultProducts),
   BRAND_FALLBACK_IMAGE: "/placeholder.svg",
 }));
 

@@ -28,10 +28,10 @@ vi.mock("@/lib/branding", () => ({
   }),
 }));
 
-// Mock catalogApi to avoid real network requests
+// Mock catalogApi to avoid real network requests while providing standard fixture products
 vi.mock("@/lib/catalogApi", () => ({
   loadCategories: vi.fn().mockResolvedValue([]),
-  loadProducts: vi.fn().mockResolvedValue([]),
+  loadProducts: vi.fn().mockImplementation(async () => defaultProducts),
   BRAND_FALLBACK_IMAGE: "/placeholder.svg",
 }));
 

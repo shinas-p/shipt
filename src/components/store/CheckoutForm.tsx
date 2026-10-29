@@ -76,8 +76,9 @@ function Field({
 }
 
 export function CheckoutForm() {
-  const { cart, subtotal, itemCount, clear, getProduct } = useStore();
+  const { cart, subtotal, itemCount, clear, getProduct, remove } = useStore();
   const { user, profile } = useCustomerAuth();
+  const unavailableItems = cart.filter((c) => !getProduct(c.productId));
 
   const [deliveryBlocks, setDeliveryBlocks] = useState<DeliveryBlock[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
@@ -344,6 +345,11 @@ export function CheckoutForm() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+
+    if (unavailableItems.length > 0) {
+      setSubmitError("Your cart contains archived or unavailable products. Please return to your cart and remove them before placing an order.");
+      return;
+    }
 
     const errs = validate(f);
     setErrors(errs);
@@ -649,7 +655,24 @@ export function CheckoutForm() {
         <ul className="mt-4 space-y-3">
           {cart.map((c) => {
             const p = getProduct(c.productId);
-            if (!p) return null;
+            if (!p) {
+              return (
+                <li key={c.productId} className="flex items-center gap-2 text-xs text-destructive bg-destructive/5 rounded-lg p-2.5 border border-destructive/20">
+                  <AlertCircle className="size-4 shrink-0" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate font-semibold">Unavailable product</span>
+                    <span className="text-[11px] text-destructive/80">Archived from catalog</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => remove(c.productId)}
+                    className="text-xs font-bold hover:underline"
+                  >
+                    Remove
+                  </button>
+                </li>
+              );
+            }
             return (
               <li key={c.productId} className="flex items-center gap-3 text-sm">
                 <img src={p.image} alt="" className="size-12 rounded-lg object-cover bg-muted" />
@@ -666,6 +689,12 @@ export function CheckoutForm() {
             );
           })}
         </ul>
+
+        {unavailableItems.length > 0 && (
+          <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+            Please remove unavailable or archived items from your cart before placing an order.
+          </div>
+        )}
 
         <div className="mt-5 space-y-2 border-t border-border pt-4 text-sm">
           <div className="flex justify-between text-muted-foreground">
@@ -685,7 +714,7 @@ export function CheckoutForm() {
         <Button
           type="submit"
           variant="hero"
-          disabled={isSubmitting}
+          disabled={isSubmitting || unavailableItems.length > 0}
           className="mt-6 h-12 w-full text-base font-bold"
         >
           {isSubmitting ? (
@@ -693,6 +722,8 @@ export function CheckoutForm() {
               <Loader2 className="mr-2 size-4 animate-spin" />
               <span>Verifying & Placing Order...</span>
             </>
+          ) : unavailableItems.length > 0 ? (
+            "Remove Unavailable Items"
           ) : (
             `Place order · ${formatINR(subtotal)}`
           )}
