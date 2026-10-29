@@ -12,7 +12,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Download, X, Smartphone, Share, PlusSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const DISMISSED_KEY = "shipt_pwa_install_dismissed_v1";
+export const PWA_DISMISSED_KEY = "shipt_pwa_install_dismissed_v1";
+const DISMISSED_KEY = PWA_DISMISSED_KEY;
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];

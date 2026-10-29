@@ -202,12 +202,12 @@ export function PushNotificationSettingsView({
               </Button>
             )}
 
-            {isSubscribed && (
+            {isAuthorized && (
               <Button
                 type="button"
                 variant="secondary"
                 onClick={handleTestPush}
-                disabled={isActionInProgress || !isAuthorized}
+                disabled={isActionInProgress}
                 className="h-10 px-4 text-xs font-bold gap-2"
                 id="admin-test-push-btn"
               >

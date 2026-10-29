@@ -26,6 +26,8 @@ export interface AdminPushSubscription {
   last_used_at?: string | null | undefined;
 }
 
+export type PushSubscriptionRow = AdminPushSubscription;
+
 export interface PushDiagnostics {
   supported: boolean;
   serviceWorkerReady: boolean;
@@ -54,21 +56,22 @@ export function urlBase64ToUint8Array(base64String: string): Uint8Array {
 /**
  * Detects browser and OS for user-friendly device label
  */
-export function getDeviceLabel(): string {
-  if (typeof navigator === "undefined") return "Unknown Device";
-  const ua = navigator.userAgent;
+export function getDeviceLabel(customUa?: string): string {
+  const ua = customUa || (typeof navigator !== "undefined" ? navigator.userAgent : "");
+  if (!ua) return "Unknown Device";
   let browser = "Browser";
   let os = "Device";
 
   if (ua.includes("Firefox/")) browser = "Firefox";
   else if (ua.includes("Edg/")) browser = "Edge";
   else if (ua.includes("Chrome/")) browser = "Chrome";
-  else if (ua.includes("Safari/")) browser = "Safari";
+  else if (ua.includes("Safari/") || ua.includes("Mobile/")) browser = "Safari";
 
-  if (ua.includes("Windows")) os = "Windows";
-  else if (ua.includes("Mac OS")) os = "macOS";
+  if (ua.includes("iPhone")) os = "iPhone";
+  else if (ua.includes("iPad")) os = "iPad";
   else if (ua.includes("Android")) os = "Android";
-  else if (ua.includes("iPhone") || ua.includes("iPad")) os = "iOS";
+  else if (ua.includes("Windows")) os = "Windows";
+  else if (ua.includes("Mac OS") || ua.includes("Macintosh")) os = "macOS";
   else if (ua.includes("Linux")) os = "Linux";
 
   return `${browser} on ${os}`;
@@ -78,11 +81,12 @@ export function getDeviceLabel(): string {
  * Safely reads the VAPID Public Key from environment variables
  */
 export function getVapidPublicKey(): string {
+  const metaEnv = typeof import.meta !== "undefined" ? (import.meta as any).env : null;
   const key =
-    (typeof import.meta !== "undefined" && import.meta.env && (
-      import.meta.env.VITE_VAPID_PUBLIC_KEY ||
-      import.meta.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
-      import.meta.env.VITE_PUBLIC_VAPID_KEY
+    (metaEnv && (
+      metaEnv["VITE_VAPID_PUBLIC_KEY"] ||
+      metaEnv["NEXT_PUBLIC_VAPID_PUBLIC_KEY"] ||
+      metaEnv["VITE_PUBLIC_VAPID_KEY"]
     )) ||
     (typeof process !== "undefined" && process.env && (
       process.env["VITE_VAPID_PUBLIC_KEY"] ||
@@ -341,8 +345,9 @@ export function usePushNotifications() {
       });
 
       const subJson = sub.toJSON();
-      const p256dh = subJson.keys?.p256dh;
-      const auth = subJson.keys?.auth;
+      const subKeys = (subJson.keys || {}) as Record<string, string>;
+      const p256dh = subKeys["p256dh"];
+      const auth = subKeys["auth"];
 
       if (!p256dh || !auth) {
         throw new Error("Push subscription returned invalid crypto keys.");
@@ -527,6 +532,7 @@ export function usePushNotifications() {
     subscriptions,
     isLoading,
     isActionInProgress,
+    loading: isLoading || isActionInProgress,
     statusMessage,
     errorMessage,
     diagnostics,

@@ -12,6 +12,7 @@ import {
   Lock,
   SlidersHorizontal,
   Share2,
+  BellRing,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +42,8 @@ export type SettingsSubView =
   | "maintenance"
   | "banners"
   | "roles"
-  | "tab_visibility";
+  | "tab_visibility"
+  | "push";
 
 interface SettingsDashboardTabProps {
   adminRole: AdminRole | null;
@@ -163,6 +165,18 @@ export function SettingsDashboardTab({
       authorized: canAccessSettings(adminRole),
       targetView: "social" as SettingsSubView,
       badge: canAccessSettings(adminRole) ? "Super Admin & Owner" : "Restricted",
+    },
+    {
+      id: "push",
+      title: "Web Push Alerts & Devices",
+      icon: BellRing,
+      iconColor: "text-emerald-600 bg-emerald-500/10",
+      description: "Configure genuine background Web Push notifications for new orders (works across closed browser tabs) and manage registered admin devices.",
+      details: "Multi-device push delivery, subscription testing & PWA install status",
+      actionLabel: "Manage Web Push & Devices",
+      authorized: true, // Any authorized admin can register/manage their device push notifications
+      targetView: "push" as SettingsSubView,
+      badge: "Real-time Push",
     },
   ];
 

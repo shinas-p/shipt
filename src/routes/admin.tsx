@@ -71,6 +71,7 @@ import { ProductSuggestionsTab } from "@/components/admin/ProductSuggestionsTab"
 import { ContactSettingsView } from "@/components/admin/ContactSettingsView";
 import { SocialSettingsView } from "@/components/admin/SocialSettingsView";
 import { AdminNotificationBell } from "@/components/admin/AdminNotificationBell";
+import { PushNotificationSettingsView } from "@/components/admin/PushNotificationSettingsView";
 import { createAdminNotification } from "@/lib/notifications";
 import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
 import { TabVisibilitySettingsView } from "@/components/admin/TabVisibilitySettingsView";
@@ -1805,7 +1806,13 @@ function AdminPortalInner() {
         </div>
 
         <div className="flex items-center gap-2">
-          <AdminNotificationBell onSelectOrder={handleNotificationSelectOrder} />
+          <AdminNotificationBell
+            onSelectOrder={handleNotificationSelectOrder}
+            onOpenPushSettings={() => {
+              setActiveTab("settings");
+              setSettingsSubView("push");
+            }}
+          />
           <Button asChild variant="outline" size="sm" className="h-9">
             <Link to="/">View Storefront</Link>
           </Button>
@@ -3469,6 +3476,13 @@ function AdminPortalInner() {
 
           {settingsSubView === "suggestions" && (
             <ProductSuggestionsTab
+              adminRole={adminRole}
+              onBackToDashboard={() => setSettingsSubView("hub")}
+            />
+          )}
+
+          {settingsSubView === "push" && (
+            <PushNotificationSettingsView
               adminRole={adminRole}
               onBackToDashboard={() => setSettingsSubView("hub")}
             />

@@ -22,14 +22,16 @@ import {
   type AdminNotification,
   type NotificationEventType,
 } from "@/lib/notifications";
+import { usePushNotifications } from "@/lib/pushNotifications";
 import { formatINR } from "@/data/products";
 import { cn } from "@/lib/utils";
 
 interface AdminNotificationBellProps {
   onSelectOrder?: (orderId: string, orderNumber?: string | null) => void;
+  onOpenPushSettings?: () => void;
 }
 
-export function AdminNotificationBell({ onSelectOrder }: AdminNotificationBellProps) {
+export function AdminNotificationBell({ onSelectOrder, onOpenPushSettings }: AdminNotificationBellProps) {
   const {
     notifications,
     unreadCount,
@@ -38,6 +40,14 @@ export function AdminNotificationBell({ onSelectOrder }: AdminNotificationBellPr
     soundEnabled,
     toggleSound,
   } = useAdminNotifications();
+
+  const {
+    isSubscribed: isPushSubscribed,
+    isSupported: isPushSupported,
+    permission: pushPermission,
+    loading: pushLoading,
+    enablePush,
+  } = usePushNotifications();
 
   const [isOpen, setIsOpen] = useState(false);
   const [browserPermission, setBrowserPermission] = useState<NotificationPermission>("default");
@@ -220,8 +230,64 @@ export function AdminNotificationBell({ onSelectOrder }: AdminNotificationBellPr
             </div>
           </div>
 
-          {/* Desktop Notification Banner */}
-          {browserPermission !== "granted" && (
+          {/* Web Push & Desktop Notification Status Banner */}
+          {isPushSupported ? (
+            isPushSubscribed ? (
+              <div className="flex items-center justify-between border-b border-border/60 bg-emerald-500/10 px-4 py-1.5 text-[11px]">
+                <div className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300 font-medium">
+                  <span className="size-2 rounded-full bg-emerald-600 animate-pulse" />
+                  <span>Web Push Active (Tabs Closed)</span>
+                </div>
+                {onOpenPushSettings && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenPushSettings();
+                      setIsOpen(false);
+                    }}
+                    className="font-bold text-emerald-700 dark:text-emerald-400 hover:underline text-[10px]"
+                    id="admin-push-settings-link"
+                  >
+                    Settings
+                  </button>
+                )}
+              </div>
+            ) : pushPermission === "denied" ? (
+              <div className="flex items-center justify-between border-b border-border/60 bg-destructive/10 px-4 py-1.5 text-[11px] text-destructive">
+                <span>Web Push blocked in browser</span>
+                {onOpenPushSettings && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenPushSettings();
+                      setIsOpen(false);
+                    }}
+                    className="font-bold underline text-[10px]"
+                  >
+                    Diagnostics
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between border-b border-border/60 bg-primary/10 px-4 py-2 text-[11px]">
+                <span className="text-foreground font-medium text-[11px] pr-2">
+                  Enable Web Push alerts (works across closed tabs)
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await enablePush();
+                    handleEnableDesktop();
+                  }}
+                  disabled={pushLoading}
+                  className="font-bold text-primary hover:underline shrink-0 text-xs"
+                  id="admin-enable-browser-notif-btn"
+                >
+                  {pushLoading ? "Enabling..." : "Enable"}
+                </button>
+              </div>
+            )
+          ) : browserPermission !== "granted" ? (
             <div className="flex items-center justify-between border-b border-border/60 bg-primary/5 px-4 py-2 text-[11px]">
               <span className="text-muted-foreground">
                 {browserPermission === "denied"
@@ -239,7 +305,7 @@ export function AdminNotificationBell({ onSelectOrder }: AdminNotificationBellPr
                 </button>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* Notifications List */}
           <div className="max-h-[360px] overflow-y-auto divide-y divide-border/40 [scrollbar-width:thin]">

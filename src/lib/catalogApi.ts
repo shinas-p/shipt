@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { categories as defaultCategories, products as defaultProducts } from "@/data/products";
 import type { Category, Product, CategoryId, CheckoutFormData, CartItem, PlacedOrderResult, TrackedOrder, DeliveryBlock } from "@/lib/types";
 import { createAdminNotification } from "@/lib/notifications";
+import { triggerAdminWebPush } from "@/lib/pushNotifications";
 
 import promoFallback from "@/assets/promo.jpg";
 
@@ -290,6 +291,19 @@ export async function placeOrder(
       });
     } catch {
       // Notification error must NEVER undo or disrupt successful order placement
+    }
+
+    // Server-side Web Push delivery to subscribed admins (operates across closed tabs)
+    try {
+      await triggerAdminWebPush({
+        order_id: orderResult.order_id,
+        order_number: orderResult.order_number,
+        total_amount: orderResult.total_amount,
+        delivery_method: payload.delivery_method,
+        event_type: "new_order",
+      });
+    } catch {
+      // Push dispatch failure must never disrupt order completion
     }
 
     return {
