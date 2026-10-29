@@ -7,7 +7,8 @@ import { CheckoutForm } from "@/components/store/CheckoutForm";
 import { ProductTable } from "@/components/admin/products/ProductTable";
 import * as catalogApi from "@/lib/catalogApi";
 import { supabase } from "@/lib/supabase";
-import type { Product, Category, DBProduct } from "@/lib/types";
+import type { Product, Category } from "@/lib/types";
+import type { DBProduct, DBCategory } from "@/components/admin/products/types";
 
 // Mock customer auth
 vi.mock("@/lib/auth", () => ({
