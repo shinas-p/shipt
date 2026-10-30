@@ -1,5 +1,4 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-
 import { createClient } from "npm:@supabase/supabase-js@2";
 /**
  * Standard CORS headers for Shipt Mart Edge Requests
@@ -32,9 +31,9 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    const merchantKey = Deno.env.get("PAYU_MERCHANT_KEY") ?? "gtKFFx"; // Default sandbox test key
-    const merchantSalt = Deno.env.get("PAYU_MERCHANT_SALT") ?? "eCwWELxi"; // Default sandbox test salt
-    const payuEnv = Deno.env.get("PAYU_ENV") ?? "test";
+    const merchantKey = (Deno.env.get("PAYU_MERCHANT_KEY") ?? "gtKFFx").trim();
+    const merchantSalt = (Deno.env.get("PAYU_MERCHANT_SALT") ?? "eCwWELxi").trim();
+    const payuEnv = (Deno.env.get("PAYU_ENV") ?? "test").trim().toLowerCase();
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
@@ -79,7 +78,7 @@ Deno.serve(async (req: Request) => {
       // Validate order exists in DB to prevent arbitrary hash generation
       const { data: orderData, error: orderErr } = await supabase
         .from("orders")
-        .select("id, order_number, total_amount, status")
+        .select("id, order_number, total_amount, status, payu_txnid")
         .eq("id", order_id)
         .single();
 
@@ -91,20 +90,46 @@ Deno.serve(async (req: Request) => {
       }
 
       const cleanPrefix = (orderData.order_number || order_number || "QM").replace(/[^a-zA-Z0-9]/g, "");
-      const txnid = body.txnid || `TXN_${cleanPrefix}_${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const txnid = (body.txnid || orderData.payu_txnid || `TXN_${cleanPrefix}_${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`).trim();
       const formattedAmount = Number(orderData.total_amount).toFixed(2);
-      const cleanName = (customer_name || "Customer").trim().split(" ")[0] || "Customer";
-      const cleanEmail = (customer_email || "student@campus.edu").trim();
-      const cleanPhone = (customer_phone || "").trim();
-      const cleanProdInfo = (product_info || `Shipt Mart Order #${orderData.order_number}`).trim();
+      const cleanName = (customer_name || "Customer")
+        .trim()
+        .split(" ")[0]
+        ?.replace(/[^a-zA-Z0-9]/g, "") || "Customer";
+      const cleanEmail = (customer_email || "student@campus.edu").trim().toLowerCase();
+      const cleanPhone = (customer_phone || "").replace(/[^0-9]/g, "").slice(-10);
+      const cleanProdInfo = (product_info || `Shipt Mart Order ${cleanPrefix}`)
+        .replace(/[#<>{}$%^&*()+=/\\|~`]/g, "")
+        .replace(/\s+/g, " ")
+        .trim() || "Shipt Mart Order";
       const baseOrigin = origin || "http://localhost:5173";
 
       const surl = `${baseOrigin}/checkout?payu_status=success&txnid=${txnid}&order_id=${orderData.id}`;
       const furl = `${baseOrigin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${orderData.id}`;
 
-      // Official PayU Request Hash formula:
+      // If order's payu_txnid was not set or differed, sync it to database
+      if (orderData.payu_txnid !== txnid) {
+        await supabase
+          .from("orders")
+          .update({ payu_txnid: txnid, updated_at: new Date().toISOString() })
+          .eq("id", orderData.id);
+
+        await supabase
+          .from("payments")
+          .update({ payu_txnid: txnid, updated_at: new Date().toISOString() })
+          .eq("order_id", orderData.id);
+      }
+
+      const u1 = (orderData.id || "").trim();
+      const u2 = (orderData.order_number || "").trim();
+      const u3 = "";
+      const u4 = "";
+      const u5 = "";
+
+      // Official PayU Hosted Checkout SHA-512 request hash formula (Classic 32-bit Salt):
       // sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
-      const hashString = `${merchantKey}|${txnid}|${formattedAmount}|${cleanProdInfo}|${cleanName}|${cleanEmail}|${orderData.id}|${orderData.order_number}|||||||${merchantSalt}`;
+      // Exactly 16 pipes: 10 between key and udf5, plus 6 trailing pipes representing udf6..udf10 and salt.
+      const hashString = `${merchantKey}|${txnid}|${formattedAmount}|${cleanProdInfo}|${cleanName}|${cleanEmail}|${u1}|${u2}|${u3}|${u4}|${u5}||||||${merchantSalt}`;
       const hash = await sha512(hashString);
       const actionUrl = payuEnv === "production" ? "https://secure.payu.in/_payment" : "https://test.payu.in/_payment";
 
@@ -123,8 +148,12 @@ Deno.serve(async (req: Request) => {
             furl,
             hash,
             action_url: actionUrl,
-            udf1: orderData.id,
-            udf2: orderData.order_number,
+            udf1: u1,
+            udf2: u2,
+            udf3: u3,
+            udf4: u4,
+            udf5: u5,
+            service_provider: "payu_paisa",
           },
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

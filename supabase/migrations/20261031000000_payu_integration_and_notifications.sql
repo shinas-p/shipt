@@ -84,6 +84,23 @@ ALTER TABLE public.payments
 
 CREATE INDEX IF NOT EXISTS idx_payments_payu_txnid ON public.payments(payu_txnid) WHERE payu_txnid IS NOT NULL;
 
+-- 2.1 EXTEND INVENTORY_MOVEMENTS TABLE CONSTRAINTS FOR PAYU LIFECYCLE
+DO $$
+BEGIN
+  ALTER TABLE public.inventory_movements DROP CONSTRAINT IF EXISTS inventory_movements_movement_type_check;
+  ALTER TABLE public.inventory_movements ADD CONSTRAINT inventory_movements_movement_type_check
+    CHECK (movement_type IN (
+      'order_deduction',
+      'payu_checkout_reserve',
+      'order_cancellation_restock',
+      'payment_failure_restock',
+      'payment_timeout_restock',
+      'manual_adjustment',
+      'restock_shipment',
+      'damaged_loss'
+    ));
+END $$;
+
 -- 3. PAYU TRANSACTION AUDIT LOG TABLE
 CREATE TABLE IF NOT EXISTS public.payu_transactions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -607,14 +624,26 @@ BEGIN
       SET stock = v_curr_stock + v_item.quantity, updated_at = now()
       WHERE id = v_item.product_id;
 
-      INSERT INTO public.inventory_movements (
-        product_id, order_id, movement_type, quantity_change,
-        previous_stock, new_stock, reason
-      ) VALUES (
-        v_item.product_id, v_order.id, 'payment_failure_restock', v_item.quantity,
-        v_curr_stock, v_curr_stock + v_item.quantity,
-        'Stock release on payment failure: ' || COALESCE(p_error_msg, 'Gateway payment failed')
-      );
+      BEGIN
+        INSERT INTO public.inventory_movements (
+          product_id, order_id, movement_type, quantity_change,
+          previous_stock, new_stock, reason
+        ) VALUES (
+          v_item.product_id, v_order.id, 'payment_failure_restock', v_item.quantity,
+          v_curr_stock, v_curr_stock + v_item.quantity,
+          'Stock release on payment failure: ' || COALESCE(p_error_msg, 'Gateway payment failed')
+        );
+      EXCEPTION
+        WHEN check_violation THEN
+          INSERT INTO public.inventory_movements (
+            product_id, order_id, movement_type, quantity_change,
+            previous_stock, new_stock, reason
+          ) VALUES (
+            v_item.product_id, v_order.id, 'order_cancellation_restock', v_item.quantity,
+            v_curr_stock, v_curr_stock + v_item.quantity,
+            'Stock release on payment failure (fallback): ' || COALESCE(p_error_msg, 'Gateway payment failed')
+          );
+      END;
     END LOOP;
 
     -- Update order to cancelled
@@ -709,14 +738,26 @@ BEGIN
       SET stock = v_curr_stock + v_item.quantity, updated_at = now()
       WHERE id = v_item.product_id;
 
-      INSERT INTO public.inventory_movements (
-        product_id, order_id, movement_type, quantity_change,
-        previous_stock, new_stock, reason
-      ) VALUES (
-        v_item.product_id, v_expired_order.id, 'payment_timeout_restock', v_item.quantity,
-        v_curr_stock, v_curr_stock + v_item.quantity,
-        'Stock released: PayU payment expired without completion'
-      );
+      BEGIN
+        INSERT INTO public.inventory_movements (
+          product_id, order_id, movement_type, quantity_change,
+          previous_stock, new_stock, reason
+        ) VALUES (
+          v_item.product_id, v_expired_order.id, 'payment_timeout_restock', v_item.quantity,
+          v_curr_stock, v_curr_stock + v_item.quantity,
+          'Stock released: PayU payment expired without completion'
+        );
+      EXCEPTION
+        WHEN check_violation THEN
+          INSERT INTO public.inventory_movements (
+            product_id, order_id, movement_type, quantity_change,
+            previous_stock, new_stock, reason
+          ) VALUES (
+            v_item.product_id, v_expired_order.id, 'order_cancellation_restock', v_item.quantity,
+            v_curr_stock, v_curr_stock + v_item.quantity,
+            'Stock released: PayU payment expired (fallback)'
+          );
+      END;
     END LOOP;
 
     -- Update order to cancelled
@@ -967,12 +1008,12 @@ BEGIN
   v_customer_name := TRIM(order_payload->>'customer_name');
   v_customer_phone := TRIM(order_payload->>'customer_phone');
   v_delivery_method := TRIM(order_payload->>'delivery_method');
-  v_delivery_block_id := order_payload->>'delivery_block_id';
-  v_hostel := order_payload->>'hostel';
-  v_block := order_payload->>'block';
-  v_room := order_payload->>'room';
-  v_pickup_location := order_payload->>'pickup_location';
-  v_delivery_instructions := order_payload->>'delivery_instructions';
+  v_delivery_block_id := NULLIF(TRIM(order_payload->>'delivery_block_id'), '');
+  v_hostel := NULLIF(TRIM(order_payload->>'hostel'), '');
+  v_block := NULLIF(TRIM(order_payload->>'block'), '');
+  v_room := NULLIF(TRIM(order_payload->>'room'), '');
+  v_pickup_location := NULLIF(TRIM(order_payload->>'pickup_location'), '');
+  v_delivery_instructions := NULLIF(TRIM(order_payload->>'delivery_instructions'), '');
   v_payment_method := TRIM(order_payload->>'payment_method');
   v_items := order_payload->'items';
 
@@ -988,8 +1029,39 @@ BEGIN
     RAISE EXCEPTION 'Invalid delivery method: must be hostel_delivery or campus_pickup';
   END IF;
 
-  IF v_delivery_method = 'hostel_delivery' AND (v_hostel IS NULL OR v_room IS NULL) THEN
-    RAISE EXCEPTION 'Hostel and room number are required for hostel delivery';
+  IF v_delivery_method = 'hostel_delivery' THEN
+    IF v_delivery_block_id IS NULL AND v_block IS NOT NULL THEN
+      v_delivery_block_id := v_block;
+    END IF;
+
+    IF v_delivery_block_id IS NULL THEN
+      RAISE EXCEPTION 'Please select your delivery block for hostel delivery.';
+    END IF;
+
+    -- Validate that delivery block exists in public.delivery_blocks
+    IF NOT EXISTS (SELECT 1 FROM public.delivery_blocks WHERE id = v_delivery_block_id AND is_active = true) THEN
+      RAISE EXCEPTION 'Invalid delivery block "%". Please select an active delivery block from the list.', v_delivery_block_id;
+    END IF;
+
+    IF v_hostel IS NULL THEN
+      v_hostel := v_delivery_block_id;
+    END IF;
+
+    IF v_block IS NULL THEN
+      v_block := v_delivery_block_id;
+    END IF;
+
+    IF v_room IS NULL THEN
+      RAISE EXCEPTION 'Room number is required for hostel delivery.';
+    END IF;
+  ELSIF v_delivery_method = 'campus_pickup' THEN
+    v_delivery_block_id := NULL;
+    v_block := NULL;
+    v_hostel := NULL;
+    v_room := NULL;
+    IF v_pickup_location IS NULL THEN
+      v_pickup_location := 'Main Store Counter';
+    END IF;
   END IF;
 
   -- Normalize payment method (upi or payu both treated as online gateway)
@@ -1115,15 +1187,27 @@ BEGIN
     SET stock = stock - v_qty, updated_at = now()
     WHERE id = v_product_id;
 
-    INSERT INTO public.inventory_movements (
-      product_id, order_id, movement_type, quantity_change,
-      previous_stock, new_stock, reason, performed_by
-    ) VALUES (
-      v_product_id, v_order_id,
-      CASE WHEN v_initial_status = 'pending_payment' THEN 'payu_checkout_reserve' ELSE 'order_deduction' END,
-      -v_qty,
-      v_db_stock, v_db_stock - v_qty, 'Order ' || v_order_number || ' reservation', v_user_id
-    );
+    BEGIN
+      INSERT INTO public.inventory_movements (
+        product_id, order_id, movement_type, quantity_change,
+        previous_stock, new_stock, reason, performed_by
+      ) VALUES (
+        v_product_id, v_order_id,
+        CASE WHEN v_initial_status = 'pending_payment' THEN 'payu_checkout_reserve' ELSE 'order_deduction' END,
+        -v_qty,
+        v_db_stock, v_db_stock - v_qty, 'Order ' || v_order_number || ' reservation', v_user_id
+      );
+    EXCEPTION
+      WHEN check_violation THEN
+        -- Graceful fallback if legacy constraint does not yet allow 'payu_checkout_reserve'
+        INSERT INTO public.inventory_movements (
+          product_id, order_id, movement_type, quantity_change,
+          previous_stock, new_stock, reason, performed_by
+        ) VALUES (
+          v_product_id, v_order_id, 'order_deduction', -v_qty,
+          v_db_stock, v_db_stock - v_qty, 'Order ' || v_order_number || ' reservation (fallback)', v_user_id
+        );
+    END;
 
     INSERT INTO public.order_items (
       order_id, product_id, product_name, product_size,

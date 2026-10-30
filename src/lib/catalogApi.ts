@@ -201,17 +201,18 @@ export async function placeOrder(
     return { success: false, error: "Your cart is empty." };
   }
 
-  const selectedBlock = form.deliveryBlockId || form.block || "";
+  const rawBlock = (form.deliveryBlockId || form.block || "").trim();
+  const selectedBlock = rawBlock.length > 0 ? rawBlock : null;
 
   const payload = {
     customer_name: form.name.trim(),
     customer_phone: form.phone.trim(),
     delivery_method: form.deliveryMethod,
     delivery_block_id: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
-    hostel: form.deliveryMethod === "hostel_delivery" ? (form.hostel || selectedBlock) : null,
+    hostel: form.deliveryMethod === "hostel_delivery" ? (form.hostel?.trim() || selectedBlock) : null,
     block: form.deliveryMethod === "hostel_delivery" ? selectedBlock : null,
     room: form.deliveryMethod === "hostel_delivery" ? (form.room?.trim() || null) : null,
-    pickup_location: form.deliveryMethod === "campus_pickup" ? form.pickupLocation : null,
+    pickup_location: form.deliveryMethod === "campus_pickup" ? (form.pickupLocation?.trim() || "Main Store Counter") : null,
     delivery_instructions: form.instructions?.trim() || null,
     payment_method: form.payment,
     items: cart.map((c) => ({

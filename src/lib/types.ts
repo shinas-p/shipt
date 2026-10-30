@@ -100,6 +100,7 @@ export interface PayUInitiateParams {
   udf3?: string;
   udf4?: string;
   udf5?: string;
+  service_provider?: string;
 }
 
 export interface PayUCheckoutPayload {
@@ -119,6 +120,7 @@ export interface PayUCheckoutPayload {
   udf3?: string;
   udf4?: string;
   udf5?: string;
+  service_provider?: string;
 }
 
 export interface OrderRefundRecord {

@@ -176,10 +176,19 @@ export async function preparePayUCheckout(
   const surl = callbackUrls?.surl || `${origin}/checkout?payu_status=success&txnid=${txnid}&order_id=${params.order_id}`;
   const furl = callbackUrls?.furl || `${origin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${params.order_id}`;
 
-  const cleanFirstName = params.customer_name.trim().split(" ")[0] || "Customer";
-  const cleanEmail = params.customer_email.trim() || "guest@campus.edu";
-  const cleanPhone = params.customer_phone.trim();
-  const cleanProductInfo = params.product_info.trim() || `Shipt Mart Order #${params.order_number}`;
+  const cleanFirstName = params.customer_name.trim().split(" ")[0]?.replace(/[^a-zA-Z0-9]/g, "") || "Customer";
+  const cleanEmail = (params.customer_email.trim() || "guest@campus.edu").toLowerCase();
+  const cleanPhone = (params.customer_phone || "").replace(/[^0-9]/g, "").slice(-10);
+  const cleanProductInfo = (params.product_info || `Shipt Mart Order ${params.order_number}`)
+    .replace(/[#<>{}$%^&*()+=/\\|~`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim() || "Shipt Mart Order";
+
+  const u1 = params.order_id || "";
+  const u2 = params.order_number || "";
+  const u3 = "";
+  const u4 = "";
+  const u5 = "";
 
   const hash = await generatePayURequestHash({
     key: config.key,
@@ -188,8 +197,11 @@ export async function preparePayUCheckout(
     productinfo: cleanProductInfo,
     firstname: cleanFirstName,
     email: cleanEmail,
-    udf1: params.order_id,
-    udf2: params.order_number,
+    udf1: u1,
+    udf2: u2,
+    udf3: u3,
+    udf4: u4,
+    udf5: u5,
     salt: config.salt,
   });
 
@@ -205,8 +217,12 @@ export async function preparePayUCheckout(
     furl,
     hash,
     action_url: config.actionUrl,
-    udf1: params.order_id,
-    udf2: params.order_number,
+    udf1: u1,
+    udf2: u2,
+    udf3: u3,
+    udf4: u4,
+    udf5: u5,
+    service_provider: "payu_paisa",
   };
 }
 
@@ -232,12 +248,12 @@ export function submitPayUHostedForm(payload: PayUCheckoutPayload): void {
     surl: payload.surl,
     furl: payload.furl,
     hash: payload.hash,
-    service_provider: "payu_paisa",
-    udf1: payload.udf1,
-    udf2: payload.udf2,
-    udf3: payload.udf3,
-    udf4: payload.udf4,
-    udf5: payload.udf5,
+    service_provider: payload.service_provider || "payu_paisa",
+    udf1: payload.udf1 ?? "",
+    udf2: payload.udf2 ?? "",
+    udf3: payload.udf3 ?? "",
+    udf4: payload.udf4 ?? "",
+    udf5: payload.udf5 ?? "",
   };
 
   Object.entries(fields).forEach(([name, val]) => {

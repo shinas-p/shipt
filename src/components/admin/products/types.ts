@@ -35,10 +35,14 @@ export interface DBInventoryMovement {
   order_id?: string | null;
   movement_type:
     | "order_deduction"
+    | "payu_checkout_reserve"
     | "order_cancellation_restock"
+    | "payment_failure_restock"
+    | "payment_timeout_restock"
     | "manual_adjustment"
     | "restock_shipment"
-    | "damaged_loss";
+    | "damaged_loss"
+    | (string & {});
   quantity_change: number;
   previous_stock: number;
   new_stock: number;

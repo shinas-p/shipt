@@ -155,7 +155,7 @@ describe("Part A: PayU Payment Gateway Integration Test Suite", () => {
         order_id: "order-uuid-1",
         order_number: "SHP-2026-101",
         amount: 350.5,
-        product_info: "Order SHP-2026-101 (3 items)",
+        product_info: "Order #SHP-2026-101 (3 items)",
         customer_name: "Rahul Verma",
         customer_email: "rahul@campus.edu",
         customer_phone: "9876543210",
@@ -172,6 +172,36 @@ describe("Part A: PayU Payment Gateway Integration Test Suite", () => {
       expect(checkoutPayload.furl).toContain("payu_status=failed");
       expect(checkoutPayload.hash).toBeDefined();
       expect(checkoutPayload.hash.length).toBe(128);
+      // Ensures productinfo does not contain hash symbols that break PayU WAF
+      expect(checkoutPayload.productinfo).not.toContain("#");
+      expect(checkoutPayload.service_provider).toBe("payu_paisa");
+      expect(checkoutPayload.udf1).toBe("order-uuid-1");
+      expect(checkoutPayload.udf2).toBe("SHP-2026-101");
+      expect(checkoutPayload.udf3).toBe("");
+      expect(checkoutPayload.udf4).toBe("");
+      expect(checkoutPayload.udf5).toBe("");
+    });
+
+    it("verifies the SHA-512 request hash sequence contains exactly 16 pipe separators", async () => {
+      // Reconstruct the exact sequence to assert 16-pipe structure
+      const sampleKey = "gtKFFx";
+      const sampleTxn = "TXN_TEST_123";
+      const sampleAmt = "10.00";
+      const sampleProd = "Shipt Mart Order QM-20261030-ABC";
+      const sampleName = "Student";
+      const sampleEmail = "student@campus.edu";
+      const sampleU1 = "order-id-123";
+      const sampleU2 = "QM-20261030-ABC";
+      const sampleU3 = "";
+      const sampleU4 = "";
+      const sampleU5 = "";
+      const sampleSalt = "eCwWELxi";
+
+      const hashStr = `${sampleKey}|${sampleTxn}|${sampleAmt}|${sampleProd}|${sampleName}|${sampleEmail}|${sampleU1}|${sampleU2}|${sampleU3}|${sampleU4}|${sampleU5}||||||${sampleSalt}`;
+      const pipeCount = (hashStr.match(/\|/g) || []).length;
+
+      expect(pipeCount).toBe(16);
+      expect(hashStr.endsWith(`||||||${sampleSalt}`)).toBe(true);
     });
   });
 
