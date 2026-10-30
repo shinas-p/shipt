@@ -60,7 +60,11 @@ export function CartDrawer() {
                   <li key={c.productId} className="flex gap-3 py-4">
                     <img
                       src={p.image}
-                      alt=""
+                      alt={p.name}
+                      width={80}
+                      height={80}
+                      loading="lazy"
+                      decoding="async"
                       className="size-20 shrink-0 rounded-xl bg-muted object-cover"
                       onError={(e) => {
                         e.currentTarget.src = BRAND_FALLBACK_IMAGE;

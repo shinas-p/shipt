@@ -13,6 +13,8 @@ const CART_KEY = "shiptmart.cart";
 const WISH_KEY = "shiptmart.wishlist";
 const LEGACY_CART_KEY = "campusmart.demo.cart";
 const LEGACY_WISH_KEY = "campusmart.demo.wishlist";
+const CATALOG_PRODUCTS_CACHE_KEY = "shiptmart.catalog.products_cache_v1";
+const CATALOG_CATEGORIES_CACHE_KEY = "shiptmart.catalog.categories_cache_v1";
 
 interface StoreCtx {
   cart: CartItem[];
@@ -41,6 +43,7 @@ interface StoreCtx {
   categories: Category[];
   getProduct: (id: string) => Product | undefined;
   isLoadingCatalog: boolean;
+  isCatalogReady: boolean;
   catalogError: string | null;
   refreshCatalog: () => Promise<void>;
 }
@@ -48,9 +51,51 @@ interface StoreCtx {
 const Ctx = createContext<StoreCtx | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>(defaultCategories);
+  const [products, setProducts] = useState<Product[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem(CATALOG_PRODUCTS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return [];
+  });
+
+  const [categories, setCategories] = useState<Category[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem(CATALOG_CATEGORIES_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return defaultCategories;
+  });
+
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
+  const [isCatalogReady, setIsCatalogReady] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = localStorage.getItem(CATALOG_PRODUCTS_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return true;
+          }
+        }
+      } catch {}
+    }
+    return false;
+  });
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -66,14 +111,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCatalogError(null);
     try {
       const [cats, prods] = await Promise.all([loadCategories(), loadProducts()]);
-      if (cats && cats.length > 0) setCategories(cats);
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+        try {
+          localStorage.setItem(CATALOG_CATEGORIES_CACHE_KEY, JSON.stringify(cats));
+        } catch {}
+      }
       // Strictly set products even if empty array [] (e.g. all products archived)
       setProducts(prods || []);
+      try {
+        localStorage.setItem(CATALOG_PRODUCTS_CACHE_KEY, JSON.stringify(prods || []));
+      } catch {}
       setCatalogError(null);
     } catch (err: any) {
       setCatalogError(err?.message || "Failed to load store products.");
     } finally {
       setIsLoadingCatalog(false);
+      setIsCatalogReady(true);
     }
   }, []);
 
@@ -263,6 +317,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       categories,
       getProduct,
       isLoadingCatalog,
+      isCatalogReady,
       catalogError,
       refreshCatalog,
     };
@@ -282,6 +337,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     categories,
     getProduct,
     isLoadingCatalog,
+    isCatalogReady,
     catalogError,
     refreshCatalog,
   ]);
@@ -316,6 +372,7 @@ const defaultStoreValue: StoreCtx = {
   categories: defaultCategories,
   getProduct: () => undefined,
   isLoadingCatalog: false,
+  isCatalogReady: false,
   catalogError: null,
   refreshCatalog: async () => {},
 };

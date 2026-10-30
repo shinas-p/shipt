@@ -92,23 +92,50 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Shipt Mart — Everyday Essentials Delivered" },
-      { name: "description", content: "Shipt Mart: Fast and reliable delivery for snacks, stationery, personal care, and everyday essentials straight to your door." },
-      { property: "og:title", content: "Shipt Mart — Everyday Essentials Delivered" },
-      { property: "og:description", content: "Shipt Mart: Fast and reliable delivery for snacks, stationery, personal care, and everyday essentials straight to your door." },
+      { title: "Shipz Mart — Everyday Essentials Delivered to Your Hostel" },
+      {
+        name: "description",
+        content:
+          "Shipz Mart: Fast and reliable doorstep delivery for snacks, stationery, personal care, and everyday essentials across Darul Huda University campus.",
+      },
+      {
+        name: "keywords",
+        content:
+          "Shipz Mart, Shipt, Darul Huda University store, campus shopping, hostel delivery, snacks delivery, stationery Chemmad, university essentials",
+      },
+      { property: "og:site_name", content: "Shipz Mart" },
+      { property: "og:title", content: "Shipz Mart — Everyday Essentials Delivered to Your Hostel" },
+      {
+        property: "og:description",
+        content:
+          "Fast and reliable doorstep delivery for snacks, stationery, personal care, and everyday essentials across Darul Huda University campus.",
+      },
       { property: "og:type", content: "website" },
+      { property: "og:url", content: "https://www.shipz.store/" },
+      { property: "og:image", content: "https://www.shipz.store/android-chrome-512x512.png" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Shipz Mart — Everyday Essentials Delivered to Your Hostel" },
+      {
+        name: "twitter:description",
+        content:
+          "Fast doorstep delivery for snacks, stationery, and hostel supplies across Darul Huda University.",
+      },
       { name: "theme-color", content: "#15803d" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "default" },
-      { name: "apple-mobile-web-app-title", content: "ShipT" },
+      { name: "apple-mobile-web-app-title", content: "Shipz Mart" },
       { name: "mobile-web-app-capable", content: "yes" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
+      { rel: "canonical", href: "https://www.shipz.store/" },
+      { rel: "preconnect", href: "https://qevjffvfxovkvyewbcrp.supabase.co" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap",
+      },
       { rel: "icon", href: "/favicon.ico", sizes: "any" },
       { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
       { rel: "icon", type: "image/png", sizes: "16x16", href: "/favicon-16x16.png" },
@@ -122,11 +149,39 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+const organizationJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "Shipz Mart",
+  alternateName: ["ShipT", "Shipt Mart"],
+  url: "https://www.shipz.store",
+  logo: "https://www.shipz.store/android-chrome-512x512.png",
+  description:
+    "Everyday essentials, snacks, stationery, and hostel supplies delivered fast across Darul Huda Islamic University campus.",
+  address: {
+    "@type": "PostalAddress",
+    addressLocality: "Chemmad",
+    addressRegion: "Kerala",
+    postalCode: "676306",
+    addressCountry: "IN",
+  },
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "Customer Support",
+    telephone: "+91 97475 79848",
+    email: "shiptmart@gmail.com",
+  },
+};
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
       </head>
       <body>
         {children}

@@ -43,6 +43,7 @@ export function ProductCard({ product: p }: { product: Product }) {
           src={p.image}
           alt={p.name}
           loading="lazy"
+          decoding="async"
           width={816}
           height={816}
           className={cn("h-full w-full object-cover transition duration-500 group-hover:scale-105", out && "opacity-50 grayscale")}
@@ -56,7 +57,13 @@ export function ProductCard({ product: p }: { product: Product }) {
         </div>
         {out && <span className="absolute inset-x-0 bottom-3 z-10 mx-auto w-fit rounded-full bg-foreground/85 px-3 py-1 text-xs font-semibold text-background">Out of stock</span>}
       </Link>
-      <button type="button" onClick={() => toggleWish(p)} aria-pressed={wished} aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`} className="absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full bg-card/90 shadow-soft backdrop-blur transition hover:scale-110">
+      <button
+        type="button"
+        onClick={() => toggleWish(p)}
+        aria-pressed={wished}
+        aria-label={wished ? `Remove ${p.name} from wishlist` : `Add ${p.name} to wishlist`}
+        className="absolute right-2 top-2 z-10 grid size-9 place-items-center rounded-full bg-card/90 shadow-soft backdrop-blur transition hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+      >
         <Heart className={cn("size-4", wished ? "fill-destructive text-destructive" : "text-foreground")} />
       </button>
       <div className="flex flex-1 flex-col gap-1 p-3 sm:p-4">

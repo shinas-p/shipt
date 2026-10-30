@@ -46,6 +46,7 @@ import {
   ScrollText,
   ShieldAlert,
   CheckCircle,
+  Check,
   Settings,
   Lightbulb,
   ArrowLeft,
@@ -72,7 +73,10 @@ import { ContactSettingsView } from "@/components/admin/ContactSettingsView";
 import { SocialSettingsView } from "@/components/admin/SocialSettingsView";
 import { AdminNotificationBell } from "@/components/admin/AdminNotificationBell";
 import { PushNotificationSettingsView } from "@/components/admin/PushNotificationSettingsView";
+import { StudentPaymentPoliciesView } from "@/components/admin/StudentPaymentPoliciesView";
 import { createAdminNotification } from "@/lib/notifications";
+import { adminManageRefund } from "@/lib/payuApi";
+import type { AdminOrderStatusTab } from "@/lib/types";
 import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
 import { TabVisibilitySettingsView } from "@/components/admin/TabVisibilitySettingsView";
 import { TabVisibilitySettingsSection } from "@/components/admin/TabVisibilitySettingsSection";
@@ -186,6 +190,8 @@ interface AdminOrder {
   total_amount: number;
   payment_method: string;
   payment_status: string;
+  payu_txnid?: string | null;
+  payu_mihpayid?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   processing_started_at?: string | null;
@@ -327,6 +333,7 @@ function AdminPortalInner() {
         badge: isMaintenanceMode ? "Active" : undefined,
       },
       { id: "suggestions", label: "Product Suggestions", icon: Lightbulb },
+      { id: "students", label: "Student Policies", icon: Users },
       { id: "roles", label: "Staff & Security", icon: Users, requiresSuperAdmin: true },
     ],
     [isMaintenanceMode]
@@ -336,6 +343,7 @@ function AdminPortalInner() {
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [orderFilter, setOrderFilter] = useState("all");
+  const [orderStatusTab, setOrderStatusTab] = useState<AdminOrderStatusTab>("all");
   const [orderBlockFilter, setOrderBlockFilter] = useState("all");
   const [isClaimingOrder, setIsClaimingOrder] = useState<string | null>(null);
   const [selectedAdminOrder, setSelectedAdminOrder] = useState<AdminOrder | null>(null);
@@ -440,9 +448,9 @@ function AdminPortalInner() {
     });
   }, [orders, adminRole, assignedBlock]);
 
-  const filteredOrders = useMemo(() => {
+  // Sector / Block filter applied to scoped orders
+  const sectorScopedOrders = useMemo(() => {
     return scopedOrders.filter((o) => {
-      if (orderFilter !== "all" && o.status !== orderFilter) return false;
       if (orderBlockFilter !== "all") {
         if (orderBlockFilter === "campus_pickup") {
           if (o.delivery_method !== "campus_pickup") return false;
@@ -453,12 +461,65 @@ function AdminPortalInner() {
       }
       return true;
     });
-  }, [scopedOrders, orderFilter, orderBlockFilter]);
+  }, [scopedOrders, orderBlockFilter]);
+
+  // Dynamic order counts per status tab matching active sector filter
+  const tabCounts = useMemo(() => {
+    let all = 0;
+    let pending = 0;
+    let processing = 0;
+    let completed = 0;
+    let cancelled = 0;
+
+    for (const o of sectorScopedOrders) {
+      all++;
+      const s = o.status.toLowerCase();
+      if (s === "placed" || s === "confirmed") {
+        pending++;
+      } else if (s === "preparing" || s === "out_for_delivery" || s === "ready_for_pickup") {
+        processing++;
+      } else if (s === "completed") {
+        completed++;
+      } else if (s === "cancelled") {
+        cancelled++;
+      }
+    }
+
+    return { all, pending, processing, completed, cancelled };
+  }, [sectorScopedOrders]);
+
+  const filteredOrders = useMemo(() => {
+    return sectorScopedOrders.filter((o) => {
+      const s = o.status.toLowerCase();
+
+      // 1. Status Tab Filter (Pending, Processing, Completed, Cancelled, All)
+      if (orderStatusTab === "pending") {
+        if (s !== "placed" && s !== "confirmed") return false;
+      } else if (orderStatusTab === "processing") {
+        if (s !== "preparing" && s !== "out_for_delivery" && s !== "ready_for_pickup") return false;
+      } else if (orderStatusTab === "completed") {
+        if (s !== "completed") return false;
+      } else if (orderStatusTab === "cancelled") {
+        if (s !== "cancelled") return false;
+      }
+
+      // 2. Secondary dropdown filter
+      if (orderFilter !== "all" && o.status !== orderFilter) return false;
+
+      return true;
+    });
+  }, [sectorScopedOrders, orderStatusTab, orderFilter]);
 
   const handleNotificationSelectOrder = useCallback((orderId: string, orderNumber?: string | null) => {
     setActiveTab("orders");
     const match = orders.find((o) => o.id === orderId || (orderNumber && o.order_number === orderNumber));
     if (match) {
+      const s = match.status.toLowerCase();
+      if (s === "placed" || s === "confirmed") setOrderStatusTab("pending");
+      else if (s === "preparing" || s === "out_for_delivery" || s === "ready_for_pickup") setOrderStatusTab("processing");
+      else if (s === "completed") setOrderStatusTab("completed");
+      else if (s === "cancelled") setOrderStatusTab("cancelled");
+      else setOrderStatusTab("all");
       setSelectedAdminOrder(match);
     }
   }, [orders]);
@@ -958,8 +1019,7 @@ function AdminPortalInner() {
     try {
       const defaultNotes =
         notes?.trim() ||
-        `Status changed to ${newStatus.replace(/_/g, " ")} by ${
-          adminRole ? getRoleBadge(adminRole).label : "Staff"
+        `Status changed to ${newStatus.replace(/_/g, " ")} by ${adminRole ? getRoleBadge(adminRole).label : "Staff"
         }`;
 
       const { error } = await supabase.rpc("admin_update_order_status", {
@@ -992,7 +1052,7 @@ function AdminPortalInner() {
             },
             dedup_key: `order_cancelled:${orderId}:${Date.now()}`,
           });
-        } catch {}
+        } catch { }
       }
 
       // Reload orders and update the open modal view with fresh DB record
@@ -1497,8 +1557,7 @@ function AdminPortalInner() {
           duration: 6000,
         });
         setCreateStaffSuccess(
-          `Successfully created staff account for ${cleanEmail} (${createStaffRole.replace("_", " ")}${
-            createStaffRole === "block_manager" ? ` - ${createStaffBlock}` : ""
+          `Successfully created staff account for ${cleanEmail} (${createStaffRole.replace("_", " ")}${createStaffRole === "block_manager" ? ` - ${createStaffBlock}` : ""
           }). An official invitation email has been sent!`
         );
         setCreateStaffEmail("");
@@ -1583,8 +1642,7 @@ function AdminPortalInner() {
         }
       } else {
         toast.success(
-          `Assigned ${newRoleType.replace("_", " ")}${
-            newRoleType === "block_manager" ? ` (${newRoleBlock})` : ""
+          `Assigned ${newRoleType.replace("_", " ")}${newRoleType === "block_manager" ? ` (${newRoleBlock})` : ""
           } to ${cleanEmail}`
         );
         setNewRoleEmail("");
@@ -1836,8 +1894,8 @@ function AdminPortalInner() {
                 {adminRole === "block_manager"
                   ? `Block Orders (${scopedOrders.length})`
                   : adminRole === "store_manager"
-                  ? `Pickup Orders (${scopedOrders.length})`
-                  : `Orders (${scopedOrders.length})`}
+                    ? `Pickup Orders (${scopedOrders.length})`
+                    : `Orders (${scopedOrders.length})`}
               </span>
             );
           } else if (tab.id === "products") {
@@ -1892,8 +1950,8 @@ function AdminPortalInner() {
                       isActive
                         ? "bg-primary text-primary-foreground shadow-xs font-bold"
                         : isRestricted
-                        ? "text-muted-foreground/50 opacity-60 cursor-not-allowed"
-                        : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                          ? "text-muted-foreground/50 opacity-60 cursor-not-allowed"
+                          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                     )}
                   >
                     <Icon className="size-3.5" />
@@ -1970,15 +2028,158 @@ function AdminPortalInner() {
       {/* TAB 1: ORDERS MANAGEMENT */}
       {activeTab === "orders" && (
         <div className="mt-6 space-y-4">
+          {/* ORDER STATUS TABS WITH ACCURATE DYNAMIC COUNTS */}
+          <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-border bg-card p-1.5 shadow-xs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "all"}
+              onClick={() => {
+                setOrderStatusTab("all");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "all"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>All</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "all"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-secondary text-foreground"
+                )}
+              >
+                {tabCounts.all}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "pending"}
+              onClick={() => {
+                setOrderStatusTab("pending");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "pending"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Pending</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "pending"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                )}
+              >
+                {tabCounts.pending}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "processing"}
+              onClick={() => {
+                setOrderStatusTab("processing");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "processing"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Processing</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "processing"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400"
+                )}
+              >
+                {tabCounts.processing}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "completed"}
+              onClick={() => {
+                setOrderStatusTab("completed");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "completed"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Completed</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "completed"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                )}
+              >
+                {tabCounts.completed}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "cancelled"}
+              onClick={() => {
+                setOrderStatusTab("cancelled");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "cancelled"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Cancelled</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "cancelled"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-destructive/15 text-destructive"
+                )}
+              >
+                {tabCounts.cancelled}
+              </span>
+            </button>
+          </div>
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold text-muted-foreground">Status:</span>
+              <span className="text-xs font-semibold text-muted-foreground">Quick Filter:</span>
               <select
                 value={orderFilter}
                 onChange={(e) => setOrderFilter(e.target.value)}
                 className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs font-medium outline-none"
               >
-                <option value="all">All statuses</option>
+                <option value="all">All in this tab</option>
                 <option value="placed">Placed</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="preparing">Preparing</option>
@@ -2008,15 +2209,54 @@ function AdminPortalInner() {
               )}
             </div>
 
-            <Button variant="outline" size="sm" onClick={loadOrders} className="h-8 gap-1 text-xs">
-              <RefreshCw className={cn("size-3.5", ordersLoading && "animate-spin")} />
-              <span>Refresh Orders</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              {canAccessSettings(adminRole) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setActiveTab("settings");
+                    setSettingsSubView("students");
+                  }}
+                  className="h-8 gap-1.5 text-xs font-semibold"
+                >
+                  <Users className="size-3.5 text-primary" />
+                  <span>Student Policies →</span>
+                </Button>
+              )}
+
+              <Button variant="outline" size="sm" onClick={loadOrders} className="h-8 gap-1 text-xs">
+                <RefreshCw className={cn("size-3.5", ordersLoading && "animate-spin")} />
+                <span>Refresh Orders</span>
+              </Button>
+            </div>
           </div>
 
           {filteredOrders.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-              No orders found matching the filter.
+            <div className="rounded-3xl border border-dashed border-border bg-card p-12 text-center space-y-2">
+              <Package className="mx-auto size-10 text-muted-foreground/40" />
+              <h3 className="font-display text-base font-bold text-foreground">
+                {orderStatusTab === "pending"
+                  ? "No Pending Orders"
+                  : orderStatusTab === "processing"
+                    ? "No Orders in Processing"
+                    : orderStatusTab === "completed"
+                      ? "No Completed Orders"
+                      : orderStatusTab === "cancelled"
+                        ? "No Cancelled Orders"
+                        : "No Orders Found"}
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                {orderStatusTab === "pending"
+                  ? "There are currently no placed or confirmed orders awaiting fulfillment."
+                  : orderStatusTab === "processing"
+                    ? "No orders are currently being prepared or out for delivery."
+                    : orderStatusTab === "completed"
+                      ? "Successfully delivered and collected orders will appear here."
+                      : orderStatusTab === "cancelled"
+                        ? "Cancelled customer orders with restored inventory will be recorded here."
+                        : "No orders match the selected filters."}
+              </p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -2035,8 +2275,8 @@ function AdminPortalInner() {
                             ord.status === "completed"
                               ? "bg-primary/10 text-primary border border-primary/20"
                               : ord.status === "cancelled"
-                              ? "bg-destructive/10 text-destructive border border-destructive/20"
-                              : "bg-warn/15 text-warn-foreground border border-warn/30"
+                                ? "bg-destructive/10 text-destructive border border-destructive/20"
+                                : "bg-warn/15 text-warn-foreground border border-warn/30"
                           )}
                         >
                           {ord.status.replace(/_/g, " ")}
@@ -2077,8 +2317,21 @@ function AdminPortalInner() {
                       <span className="font-display text-base font-extrabold text-foreground">
                         {formatINR(ord.total_amount)}
                       </span>
-                      <p className="text-[11px] uppercase font-semibold text-muted-foreground">
-                        {ord.payment_method} · {ord.payment_status}
+                      <p className="text-[11px] font-semibold text-muted-foreground flex items-center justify-end gap-1 mt-0.5">
+                        <span className="uppercase">{ord.payment_method}</span>
+                        <span>·</span>
+                        <span className={cn(
+                          "capitalize",
+                          ord.payment_status === "paid" || ord.payment_status === "completed"
+                            ? "text-emerald-600 font-bold"
+                            : ord.payment_status === "refund_pending"
+                              ? "text-orange-600 font-bold"
+                              : ord.payment_status === "failed"
+                                ? "text-destructive"
+                                : "text-amber-600"
+                        )}>
+                          {ord.payment_status.replace(/_/g, " ")}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -2249,8 +2502,8 @@ function AdminPortalInner() {
                           selectedAdminOrder.status === "completed"
                             ? "bg-primary/10 text-primary border-primary/30"
                             : selectedAdminOrder.status === "cancelled"
-                            ? "bg-destructive/10 text-destructive border-destructive/30"
-                            : "bg-warn/15 text-warn-foreground border-warn/30"
+                              ? "bg-destructive/10 text-destructive border-destructive/30"
+                              : "bg-warn/15 text-warn-foreground border-warn/30"
                         )}
                       >
                         {selectedAdminOrder.status.replace(/_/g, " ")}
@@ -2285,9 +2538,8 @@ function AdminPortalInner() {
                       </div>
                       <p className="font-bold text-sm text-foreground">
                         {selectedAdminOrder.delivery_method === "hostel_delivery"
-                          ? `${selectedAdminOrder.hostel || "Hostel / Residence"}${
-                              selectedAdminOrder.block ? `, Block ${selectedAdminOrder.block}` : ""
-                            }${selectedAdminOrder.room ? `, Room ${selectedAdminOrder.room}` : ""}`
+                          ? `${selectedAdminOrder.hostel || "Hostel / Residence"}${selectedAdminOrder.block ? `, Block ${selectedAdminOrder.block}` : ""
+                          }${selectedAdminOrder.room ? `, Room ${selectedAdminOrder.room}` : ""}`
                           : selectedAdminOrder.pickup_location || "Store Counter"}
                       </p>
                       {selectedAdminOrder.delivery_instructions && (
@@ -2438,17 +2690,89 @@ function AdminPortalInner() {
                         variant="outline"
                         className={cn(
                           "capitalize text-[10px]",
-                          selectedAdminOrder.payment_status === "completed"
-                            ? "bg-primary/10 text-primary border-primary/30"
-                            : selectedAdminOrder.payment_status === "failed"
-                            ? "bg-destructive/10 text-destructive border-destructive/30"
-                            : "bg-amber-500/10 text-amber-700 border-amber-500/30"
+                          selectedAdminOrder.payment_status === "paid" || selectedAdminOrder.payment_status === "completed"
+                            ? "bg-emerald-600/15 text-emerald-700 border-emerald-600/30 font-semibold"
+                            : selectedAdminOrder.payment_status === "refund_pending"
+                              ? "bg-orange-500/15 text-orange-700 border-orange-500/30 font-semibold"
+                              : selectedAdminOrder.payment_status === "refunded"
+                                ? "bg-purple-500/15 text-purple-700 border-purple-500/30"
+                                : selectedAdminOrder.payment_status === "failed"
+                                  ? "bg-destructive/10 text-destructive border-destructive/30"
+                                  : "bg-amber-500/10 text-amber-700 border-amber-500/30"
                         )}
                       >
-                        Payment {selectedAdminOrder.payment_status}
+                        Payment {selectedAdminOrder.payment_status.replace(/_/g, " ")}
                       </Badge>
                     </div>
+
+                    {selectedAdminOrder.payu_txnid && (
+                      <div className="flex items-center justify-between border-t border-border/40 pt-2 text-[11px] text-muted-foreground">
+                        <span>PayU Transaction Ref:</span>
+                        <span className="font-mono font-bold text-foreground">{selectedAdminOrder.payu_txnid}</span>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Refund Review Banner & Actions */}
+                  {selectedAdminOrder.payment_status === "refund_pending" && (
+                    <div className="rounded-2xl border border-orange-500/30 bg-orange-500/10 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-orange-800 dark:text-orange-300">
+                        <AlertCircle className="size-4 shrink-0" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider">Refund Action Required</h4>
+                      </div>
+                      <p className="text-xs text-orange-700 dark:text-orange-400">
+                        A refund was flagged for this cancelled or overpaid order (Total: {formatINR(selectedAdminOrder.total_amount)}).
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="hero"
+                          className="h-8 text-xs font-semibold gap-1.5"
+                          onClick={async () => {
+                            const res = await adminManageRefund({
+                              orderId: selectedAdminOrder.id,
+                              action: "complete",
+                              notes: "Refund processed by administrator.",
+                            });
+                            if (res.success) {
+                              toast.success("Refund marked as completed.");
+                              setSelectedAdminOrder((prev) => prev ? { ...prev, payment_status: "refunded" } : null);
+                              setOrders((prev) => prev.map((o) => o.id === selectedAdminOrder.id ? { ...o, payment_status: "refunded" } : o));
+                            } else {
+                              toast.error(res.error || "Failed to process refund.");
+                            }
+                          }}
+                        >
+                          <Check className="size-3.5" />
+                          <span>Mark Refund Completed</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={async () => {
+                            const res = await adminManageRefund({
+                              orderId: selectedAdminOrder.id,
+                              action: "reject",
+                              notes: "Refund declined by administrator.",
+                            });
+                            if (res.success) {
+                              toast.info("Refund request declined.");
+                              setSelectedAdminOrder((prev) => prev ? { ...prev, payment_status: "paid" } : null);
+                              setOrders((prev) => prev.map((o) => o.id === selectedAdminOrder.id ? { ...o, payment_status: "paid" } : o));
+                            } else {
+                              toast.error(res.error || "Failed to decline refund.");
+                            }
+                          }}
+                        >
+                          <X className="size-3.5" />
+                          <span>Decline Refund</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Status History Audit Trail */}
                   <div className="space-y-3">
@@ -2622,507 +2946,422 @@ function AdminPortalInner() {
       {/* TAB 3: PROMOTIONAL BANNERS MANAGEMENT (SUPER ADMIN & OWNER) */}
       {((activeTab === "banners" && canManageBanners(adminRole)) ||
         (activeTab === "settings" && settingsSubView === "banners" && canManageBanners(adminRole))) && (
-        <div className="mt-6 space-y-6">
-          <div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setActiveTab("settings");
-                setSettingsSubView("hub");
-              }}
-              className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="size-4" />
-              <span>Back to Settings Overview</span>
-            </Button>
-          </div>
-
-          {/* Create or Edit Banner Card */}
-          <div id="banner-form-card" className="rounded-3xl border border-border bg-card p-5 sm:p-7 shadow-xs">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="font-display text-lg font-bold text-foreground">
-                    {editingBanner ? "Edit Promotional Banner" : "Create Promotional Banner"}
-                  </h2>
-                  {editingBanner && (
-                    <Badge variant="outline" className="border-primary/40 text-primary bg-primary/10 text-[10px]">
-                      Editing Active
-                    </Badge>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Configure wide full-image promotional banners with custom destination routing across the store.
-                </p>
-              </div>
-
-              {editingBanner && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCancelEditBanner}
-                  className="h-8 gap-1.5 text-xs"
-                >
-                  <X className="size-3.5" />
-                  <span>Cancel Edit</span>
-                </Button>
-              )}
+          <div className="mt-6 space-y-6">
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setActiveTab("settings");
+                  setSettingsSubView("hub");
+                }}
+                className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4" />
+                <span>Back to Settings Overview</span>
+              </Button>
             </div>
 
-            <form onSubmit={handleSaveBanner} className="mt-5 grid gap-5 md:grid-cols-2">
-              <div className="space-y-3">
+            {/* Create or Edit Banner Card */}
+            <div id="banner-form-card" className="rounded-3xl border border-border bg-card p-5 sm:p-7 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Headline Title</label>
-                  <input
-                    type="text"
-                    value={newBanner.title}
-                    onChange={(e) => setNewBanner({ ...newBanner, title: e.target.value })}
-                    placeholder="e.g. Exam Season Fuel (Optional if image has text)"
-                    className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                  />
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-display text-lg font-bold text-foreground">
+                      {editingBanner ? "Edit Promotional Banner" : "Create Promotional Banner"}
+                    </h2>
+                    {editingBanner && (
+                      <Badge variant="outline" className="border-primary/40 text-primary bg-primary/10 text-[10px]">
+                        Editing Active
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Configure wide full-image promotional banners with custom destination routing across the store.
+                  </p>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Description</label>
-                  <textarea
-                    rows={2}
-                    value={newBanner.description}
-                    onChange={(e) => setNewBanner({ ...newBanner, description: e.target.value })}
-                    placeholder="Crispy snacks and drinks delivered directly to your hostel room..."
-                    className="w-full rounded-xl border border-input bg-card p-2.5 text-xs outline-none focus:border-primary"
-                  />
-                </div>
+                {editingBanner && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelEditBanner}
+                    className="h-8 gap-1.5 text-xs"
+                  >
+                    <X className="size-3.5" />
+                    <span>Cancel Edit</span>
+                  </Button>
+                )}
+              </div>
 
-                <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleSaveBanner} className="mt-5 grid gap-5 md:grid-cols-2">
+                <div className="space-y-3">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Button Text</label>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Headline Title</label>
                     <input
                       type="text"
-                      value={newBanner.button_text}
-                      onChange={(e) => setNewBanner({ ...newBanner, button_text: e.target.value })}
-                      placeholder="e.g. Shop Now"
+                      value={newBanner.title}
+                      onChange={(e) => setNewBanner({ ...newBanner, title: e.target.value })}
+                      placeholder="e.g. Exam Season Fuel (Optional if image has text)"
                       className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Destination Type</label>
-                    <select
-                      value={newBanner.destination_type}
-                      onChange={(e) => {
-                        const type = e.target.value;
-                        let defaultUrl = "#category-snacks";
-                        if (type === "internal") defaultUrl = "/cart";
-                        if (type === "external") defaultUrl = "https://";
-                        if (type === "product") defaultUrl = "#product-";
-                        setNewBanner({ ...newBanner, destination_type: type, button_url: defaultUrl });
-                      }}
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Description</label>
+                    <textarea
+                      rows={2}
+                      value={newBanner.description}
+                      onChange={(e) => setNewBanner({ ...newBanner, description: e.target.value })}
+                      placeholder="Crispy snacks and drinks delivered directly to your hostel room..."
+                      className="w-full rounded-xl border border-input bg-card p-2.5 text-xs outline-none focus:border-primary"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">Button Text</label>
+                      <input
+                        type="text"
+                        value={newBanner.button_text}
+                        onChange={(e) => setNewBanner({ ...newBanner, button_text: e.target.value })}
+                        placeholder="e.g. Shop Now"
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">Destination Type</label>
+                      <select
+                        value={newBanner.destination_type}
+                        onChange={(e) => {
+                          const type = e.target.value;
+                          let defaultUrl = "#category-snacks";
+                          if (type === "internal") defaultUrl = "/cart";
+                          if (type === "external") defaultUrl = "https://";
+                          if (type === "product") defaultUrl = "#product-";
+                          setNewBanner({ ...newBanner, destination_type: type, button_url: defaultUrl });
+                        }}
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                      >
+                        <option value="category">Category Filter</option>
+                        <option value="product">Product Details</option>
+                        <option value="internal">Internal Page (/cart, /checkout)</option>
+                        <option value="external">External Website</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Destination Target / Link *</label>
+                    <input
+                      type="text"
+                      required
+                      value={newBanner.button_url}
+                      onChange={(e) => setNewBanner({ ...newBanner, button_url: e.target.value })}
+                      placeholder="e.g. #category-snacks, /cart, or https://example.com"
                       className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                    >
-                      <option value="category">Category Filter</option>
-                      <option value="product">Product Details</option>
-                      <option value="internal">Internal Page (/cart, /checkout)</option>
-                      <option value="external">External Website</option>
-                    </select>
+                    />
+                  </div>
+
+                  {/* Upload or Replace Image Section */}
+                  <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-foreground">
+                        {editingBanner ? "Replace Banner Image" : "Upload Banner Image *"}
+                      </label>
+                      {newBanner.image_url && (
+                        <span className="text-[10px] text-primary font-semibold">Image loaded</span>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handleBannerUpload}
+                      disabled={uploadingBannerImage}
+                      className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/90"
+                    />
+                    {uploadingBannerImage && <p className="text-xs text-primary animate-pulse">Uploading to Supabase Storage...</p>}
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="banner-is-active"
+                      checked={newBanner.is_active}
+                      onChange={(e) => setNewBanner({ ...newBanner, is_active: e.target.checked })}
+                      className="size-4 rounded text-primary"
+                    />
+                    <label htmlFor="banner-is-active" className="text-xs font-semibold text-foreground">
+                      Active & visible in customer carousel
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    {editingBanner && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleCancelEditBanner}
+                        className="h-10 text-xs"
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                    <Button type="submit" variant="hero" className="h-10 flex-1 font-bold text-xs">
+                      {editingBanner ? "Update Promotional Banner" : "Save & Publish Promotional Banner"}
+                    </Button>
                   </div>
                 </div>
 
+                {/* Real-time Wide Banner Preview */}
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Destination Target / Link *</label>
-                  <input
-                    type="text"
-                    required
-                    value={newBanner.button_url}
-                    onChange={(e) => setNewBanner({ ...newBanner, button_url: e.target.value })}
-                    placeholder="e.g. #category-snacks, /cart, or https://example.com"
-                    className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
-                  />
-                </div>
+                  <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Storefront Banner Preview:</span>
+                  <div className="relative h-44 w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                    {newBanner.image_url ? (
+                      <img src={newBanner.image_url} alt="" className="h-full w-full object-cover object-center" />
+                    ) : (
+                      <div className="grid h-full place-items-center text-xs text-muted-foreground bg-muted">
+                        Upload wide promotional image to preview
+                      </div>
+                    )}
 
-                {/* Upload or Replace Image Section */}
-                <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-foreground">
-                      {editingBanner ? "Replace Banner Image" : "Upload Banner Image *"}
-                    </label>
-                    {newBanner.image_url && (
-                      <span className="text-[10px] text-primary font-semibold">Image loaded</span>
+                    {(newBanner.title || newBanner.description || newBanner.button_text) && (
+                      <div className="absolute inset-y-0 left-0 z-10 flex items-center p-3 max-w-xs">
+                        <div className="rounded-xl border border-white/20 bg-black/45 p-3 backdrop-blur-md text-white shadow-md">
+                          <span className="text-[10px] font-bold text-lime">Special Offer</span>
+                          {newBanner.title && (
+                            <h4 className="font-display text-sm font-bold text-white mt-0.5 line-clamp-1">
+                              {newBanner.title}
+                            </h4>
+                          )}
+                          {newBanner.description && (
+                            <p className="text-[11px] text-white/90 line-clamp-2 mt-0.5 leading-tight">
+                              {newBanner.description}
+                            </p>
+                          )}
+                          {newBanner.button_text && (
+                            <span className="mt-2 inline-block rounded-md bg-lime px-2 py-0.5 text-[10px] font-bold text-lime-foreground">
+                              {newBanner.button_text}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={handleBannerUpload}
-                    disabled={uploadingBannerImage}
-                    className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-xl file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/90"
-                  />
-                  {uploadingBannerImage && <p className="text-xs text-primary animate-pulse">Uploading to Supabase Storage...</p>}
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    The entire banner card will be clickable and link to <span className="font-mono text-foreground font-semibold">{newBanner.button_url || "..."}</span>
+                  </p>
                 </div>
+              </form>
+            </div>
 
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="banner-is-active"
-                    checked={newBanner.is_active}
-                    onChange={(e) => setNewBanner({ ...newBanner, is_active: e.target.checked })}
-                    className="size-4 rounded text-primary"
-                  />
-                  <label htmlFor="banner-is-active" className="text-xs font-semibold text-foreground">
-                    Active & visible in customer carousel
-                  </label>
-                </div>
+            {/* Existing Banners */}
+            <div className="space-y-4">
+              <h3 className="font-display text-base font-bold text-foreground">Existing Banners ({banners.length})</h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {banners.map((b) => (
+                  <div key={b.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs flex flex-col justify-between">
+                    <div>
+                      <div className="relative h-36 w-full bg-muted">
+                        <img src={b.image_url} alt="" className="h-full w-full object-cover object-center" />
+                        <span
+                          className={cn(
+                            "absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                            b.is_active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {b.is_active ? "Active" : "Disabled"}
+                        </span>
+                      </div>
 
-                <div className="flex gap-2 pt-1">
-                  {editingBanner && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleCancelEditBanner}
-                      className="h-10 text-xs"
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button type="submit" variant="hero" className="h-10 flex-1 font-bold text-xs">
-                    {editingBanner ? "Update Promotional Banner" : "Save & Publish Promotional Banner"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Real-time Wide Banner Preview */}
-              <div>
-                <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">Storefront Banner Preview:</span>
-                <div className="relative h-44 w-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-                  {newBanner.image_url ? (
-                    <img src={newBanner.image_url} alt="" className="h-full w-full object-cover object-center" />
-                  ) : (
-                    <div className="grid h-full place-items-center text-xs text-muted-foreground bg-muted">
-                      Upload wide promotional image to preview
-                    </div>
-                  )}
-
-                  {(newBanner.title || newBanner.description || newBanner.button_text) && (
-                    <div className="absolute inset-y-0 left-0 z-10 flex items-center p-3 max-w-xs">
-                      <div className="rounded-xl border border-white/20 bg-black/45 p-3 backdrop-blur-md text-white shadow-md">
-                        <span className="text-[10px] font-bold text-lime">Special Offer</span>
-                        {newBanner.title && (
-                          <h4 className="font-display text-sm font-bold text-white mt-0.5 line-clamp-1">
-                            {newBanner.title}
-                          </h4>
+                      <div className="p-4">
+                        <h4 className="font-display text-sm font-bold text-foreground">{b.title || "Image Banner"}</h4>
+                        {b.description && (
+                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{b.description}</p>
                         )}
-                        {newBanner.description && (
-                          <p className="text-[11px] text-white/90 line-clamp-2 mt-0.5 leading-tight">
-                            {newBanner.description}
-                          </p>
-                        )}
-                        {newBanner.button_text && (
-                          <span className="mt-2 inline-block rounded-md bg-lime px-2 py-0.5 text-[10px] font-bold text-lime-foreground">
-                            {newBanner.button_text}
-                          </span>
-                        )}
+                        <p className="mt-1 text-[11px] font-mono text-primary truncate">Link: {b.button_url}</p>
                       </div>
                     </div>
-                  )}
-                </div>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  The entire banner card will be clickable and link to <span className="font-mono text-foreground font-semibold">{newBanner.button_url || "..."}</span>
-                </p>
-              </div>
-            </form>
-          </div>
 
-          {/* Existing Banners */}
-          <div className="space-y-4">
-            <h3 className="font-display text-base font-bold text-foreground">Existing Banners ({banners.length})</h3>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {banners.map((b) => (
-                <div key={b.id} className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs flex flex-col justify-between">
-                  <div>
-                    <div className="relative h-36 w-full bg-muted">
-                      <img src={b.image_url} alt="" className="h-full w-full object-cover object-center" />
-                      <span
-                        className={cn(
-                          "absolute right-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                          b.is_active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                        )}
-                      >
-                        {b.is_active ? "Active" : "Disabled"}
-                      </span>
-                    </div>
+                    <div className="p-4 pt-0">
+                      <div className="flex items-center justify-between border-t border-border/60 pt-3">
+                        <div className="flex items-center gap-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditBanner(b)}
+                            className="h-7 gap-1 text-xs font-semibold"
+                          >
+                            <Edit3 className="size-3" />
+                            <span>Edit</span>
+                          </Button>
 
-                    <div className="p-4">
-                      <h4 className="font-display text-sm font-bold text-foreground">{b.title || "Image Banner"}</h4>
-                      {b.description && (
-                        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{b.description}</p>
-                      )}
-                      <p className="mt-1 text-[11px] font-mono text-primary truncate">Link: {b.button_url}</p>
-                    </div>
-                  </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleBannerActive(b.id, b.is_active)}
+                            className="text-xs font-semibold text-primary hover:underline"
+                          >
+                            {b.is_active ? "Deactivate" : "Activate"}
+                          </button>
+                        </div>
 
-                  <div className="p-4 pt-0">
-                    <div className="flex items-center justify-between border-t border-border/60 pt-3">
-                      <div className="flex items-center gap-3">
                         <Button
-                          type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="sm"
-                          onClick={() => openEditBanner(b)}
-                          className="h-7 gap-1 text-xs font-semibold"
+                          onClick={() => handleDeleteBanner(b.id)}
+                          className="h-7 text-xs text-destructive hover:bg-destructive/10"
                         >
-                          <Edit3 className="size-3" />
-                          <span>Edit</span>
+                          <Trash2 className="size-3.5 mr-1" />
+                          <span>Delete</span>
                         </Button>
-
-                        <button
-                          type="button"
-                          onClick={() => toggleBannerActive(b.id, b.is_active)}
-                          className="text-xs font-semibold text-primary hover:underline"
-                        >
-                          {b.is_active ? "Deactivate" : "Activate"}
-                        </button>
                       </div>
-
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteBanner(b.id)}
-                        className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="size-3.5 mr-1" />
-                        <span>Delete</span>
-                      </Button>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* TAB 4: STAFF & ROLES MANAGEMENT (SUPER ADMIN ONLY) */}
       {((activeTab === "roles" && adminRole === "super_admin") ||
         (activeTab === "settings" && settingsSubView === "roles" && adminRole === "super_admin")) && (
-        <div className="mt-6 space-y-6">
-          <div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setActiveTab("settings");
-                setSettingsSubView("hub");
-              }}
-              className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="size-4" />
-              <span>Back to Settings Overview</span>
-            </Button>
-          </div>
-
-          {/* Migration Pending Notice */}
-          {rolesRpcPending && (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5 shadow-xs">
-              <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
-                <AlertTriangle className="size-4 shrink-0 text-amber-600" />
-                <span>Supabase Migration Pending Execution</span>
-              </div>
-              <p className="leading-relaxed">
-                The role administration functions (<code>admin_assign_role</code>, <code>admin_list_roles</code>) have not yet been executed in your remote Supabase database.
-                To enable staff email resolution and role assignments, run <code>supabase/migrations/20261014010000_role_based_administration.sql</code> in your Supabase SQL Editor.
-              </p>
+          <div className="mt-6 space-y-6">
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setActiveTab("settings");
+                  setSettingsSubView("hub");
+                }}
+                className="-ml-3 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="size-4" />
+                <span>Back to Settings Overview</span>
+              </Button>
             </div>
-          )}
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* 1. Direct Staff Account Creation Form */}
-            <div className="rounded-3xl border border-primary/20 bg-card p-6 shadow-xs relative overflow-hidden">
-              <div className="flex items-center gap-2">
-                <UserPlus className="size-5 text-primary" />
-                <h2 className="font-display text-lg font-bold text-foreground">Create Staff Account</h2>
-                <Badge variant="outline" className="ml-auto text-[10px] font-bold border-primary/30 text-primary">
-                  Direct Onboard
-                </Badge>
+            {/* Migration Pending Notice */}
+            {rolesRpcPending && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-1.5 shadow-xs">
+                <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                  <span>Supabase Migration Pending Execution</span>
+                </div>
+                <p className="leading-relaxed">
+                  The role administration functions (<code>admin_assign_role</code>, <code>admin_list_roles</code>) have not yet been executed in your remote Supabase database.
+                  To enable staff email resolution and role assignments, run <code>supabase/migrations/20261014010000_role_based_administration.sql</code> in your Supabase SQL Editor.
+                </p>
               </div>
-              <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                Directly onboard a new Store Manager or Super Admin without prior self-registration. An official invitation and secure password setup link will be emailed to them.
-              </p>
+            )}
 
-              {createStaffSuccess && (
-                <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
-                  <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
-                  <span className="leading-relaxed">{createStaffSuccess}</span>
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* 1. Direct Staff Account Creation Form */}
+              <div className="rounded-3xl border border-primary/20 bg-card p-6 shadow-xs relative overflow-hidden">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="size-5 text-primary" />
+                  <h2 className="font-display text-lg font-bold text-foreground">Create Staff Account</h2>
+                  <Badge variant="outline" className="ml-auto text-[10px] font-bold border-primary/30 text-primary">
+                    Direct Onboard
+                  </Badge>
                 </div>
-              )}
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Directly onboard a new Store Manager or Super Admin without prior self-registration. An official invitation and secure password setup link will be emailed to them.
+                </p>
 
-              {createStaffError && !existingAccountConflict && (
-                <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
-                  <AlertCircle className="size-4 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{createStaffError}</span>
-                </div>
-              )}
-
-              {existingAccountConflict && (
-                <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-2">
-                  <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
-                    <AlertTriangle className="size-4 shrink-0 text-amber-600" />
-                    <span>Existing User Account Detected</span>
-                  </div>
-                  <p className="leading-relaxed">
-                    <strong>{existingAccountConflict.email}</strong> is already registered in Shipt Auth. To protect their account from being overwritten, assign their administrative role directly:
-                  </p>
-                  <Button
-                    type="button"
-                    variant="hero"
-                    size="sm"
-                    disabled={assigningRole}
-                    onClick={() =>
-                      handleAssignExistingAfterConflict(
-                        existingAccountConflict.email,
-                        existingAccountConflict.role
-                      )
-                    }
-                    className="h-8 text-xs font-bold gap-1.5"
-                  >
-                    {assigningRole ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <ShieldCheck className="size-3.5" />
-                    )}
-                    <span>
-                      Assign {existingAccountConflict.role.replace("_", " ")} Role Now
-                    </span>
-                  </Button>
-                </div>
-              )}
-
-              <form onSubmit={handleCreateStaffAccount} className="mt-5 space-y-4">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">
-                    Staff Full Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={createStaffName}
-                    onChange={(e) => setCreateStaffName(e.target.value)}
-                    placeholder="e.g. Rahul Sharma or Priya Patel"
-                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                  />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Personalizes the invitation email greeting (e.g. &quot;Hello Rahul Sharma,&quot;).
-                  </p>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">
-                    Staff Email Address *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={createStaffEmail}
-                    onChange={(e) => setCreateStaffEmail(e.target.value)}
-                    placeholder="manager@shiptmart.com or staff@shiptmart.com"
-                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">
-                    Role Permission Level *
-                  </label>
-                  <select
-                    value={createStaffRole}
-                    onChange={(e) => setCreateStaffRole(e.target.value as AdminRole)}
-                    className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                  >
-                    <option value="store_manager">Store Manager (Catalog, Stock, Orders)</option>
-                    <option value="owner">Store Owner (Business, Analytics, Private Costs)</option>
-                    <option value="super_admin">Super Administrator (Full System & Security Access)</option>
-                    <option value="block_manager">Block Manager (Assigned Delivery Block Only)</option>
-                  </select>
-                </div>
-
-                {createStaffRole === "block_manager" && (
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">
-                      Assigned Delivery Block *
-                    </label>
-                    <select
-                      value={createStaffBlock}
-                      onChange={(e) => setCreateStaffBlock(e.target.value)}
-                      required
-                      className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
-                    >
-                      {availableBlocks.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name} ({b.id})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Block Managers are strictly restricted to orders within this delivery block.
-                    </p>
+                {createStaffSuccess && (
+                  <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
+                    <CheckCircle2 className="size-4 shrink-0 text-emerald-600 mt-0.5" />
+                    <span className="leading-relaxed">{createStaffSuccess}</span>
                   </div>
                 )}
 
-                <Button
-                  type="submit"
-                  variant="hero"
-                  disabled={creatingStaff}
-                  className="h-11 px-6 font-bold text-xs gap-1.5 w-full sm:w-auto"
-                >
-                  {creatingStaff ? (
-                    <>
-                      <Loader2 className="size-4 animate-spin" />
-                      <span>Creating Staff Account...</span>
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="size-4" />
-                      <span>Create Staff Account</span>
-                    </>
-                  )}
-                </Button>
-              </form>
-            </div>
+                {createStaffError && !existingAccountConflict && (
+                  <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+                    <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">{createStaffError}</span>
+                  </div>
+                )}
 
-            {/* Right Column: Existing User Role Assignment & Setup Guide */}
-            <div className="space-y-6">
-              {/* 2. Assign Role to Already Registered Account */}
-              <div className="rounded-3xl border border-border bg-card p-6 shadow-xs">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="size-5 text-primary" />
-                  <h3 className="font-display text-base font-bold text-foreground">
-                    Assign Role to Existing Account
-                  </h3>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Grant an administrative role to a user who already has a registered Shipt account.
-                </p>
+                {existingAccountConflict && (
+                  <div className="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+                    <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                      <span>Existing User Account Detected</span>
+                    </div>
+                    <p className="leading-relaxed">
+                      <strong>{existingAccountConflict.email}</strong> is already registered in Shipt Auth. To protect their account from being overwritten, assign their administrative role directly:
+                    </p>
+                    <Button
+                      type="button"
+                      variant="hero"
+                      size="sm"
+                      disabled={assigningRole}
+                      onClick={() =>
+                        handleAssignExistingAfterConflict(
+                          existingAccountConflict.email,
+                          existingAccountConflict.role
+                        )
+                      }
+                      className="h-8 text-xs font-bold gap-1.5"
+                    >
+                      {assigningRole ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="size-3.5" />
+                      )}
+                      <span>
+                        Assign {existingAccountConflict.role.replace("_", " ")} Role Now
+                      </span>
+                    </Button>
+                  </div>
+                )}
 
-                <form onSubmit={handleAssignRole} className="mt-4 space-y-3.5">
+                <form onSubmit={handleCreateStaffAccount} className="mt-5 space-y-4">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Registered User Email *</label>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Staff Full Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={createStaffName}
+                      onChange={(e) => setCreateStaffName(e.target.value)}
+                      placeholder="e.g. Rahul Sharma or Priya Patel"
+                      className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Personalizes the invitation email greeting (e.g. &quot;Hello Rahul Sharma,&quot;).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Staff Email Address *
+                    </label>
                     <input
                       type="email"
                       required
-                      value={newRoleEmail}
-                      onChange={(e) => setNewRoleEmail(e.target.value)}
-                      placeholder="user@shiptmart.com or staff@shiptmart.com"
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                      value={createStaffEmail}
+                      onChange={(e) => setCreateStaffEmail(e.target.value)}
+                      placeholder="manager@shiptmart.com or staff@shiptmart.com"
+                      className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Role Level *</label>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Role Permission Level *
+                    </label>
                     <select
-                      value={newRoleType}
-                      onChange={(e) => setNewRoleType(e.target.value as AdminRole)}
-                      className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                      value={createStaffRole}
+                      onChange={(e) => setCreateStaffRole(e.target.value as AdminRole)}
+                      className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                     >
                       <option value="store_manager">Store Manager (Catalog, Stock, Orders)</option>
                       <option value="owner">Store Owner (Business, Analytics, Private Costs)</option>
@@ -3131,16 +3370,16 @@ function AdminPortalInner() {
                     </select>
                   </div>
 
-                  {newRoleType === "block_manager" && (
+                  {createStaffRole === "block_manager" && (
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-foreground">
                         Assigned Delivery Block *
                       </label>
                       <select
-                        value={newRoleBlock}
-                        onChange={(e) => setNewRoleBlock(e.target.value)}
+                        value={createStaffBlock}
+                        onChange={(e) => setCreateStaffBlock(e.target.value)}
                         required
-                        className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                        className="h-11 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                       >
                         {availableBlocks.map((b) => (
                           <option key={b.id} value={b.id}>
@@ -3149,224 +3388,309 @@ function AdminPortalInner() {
                         ))}
                       </select>
                       <p className="mt-1 text-[11px] text-muted-foreground">
-                        Restricts this administrator's view and operations to this delivery block.
+                        Block Managers are strictly restricted to orders within this delivery block.
                       </p>
                     </div>
                   )}
 
-                  <Button type="submit" variant="outline" disabled={assigningRole} className="h-10 px-5 font-bold text-xs">
-                    {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
+                  <Button
+                    type="submit"
+                    variant="hero"
+                    disabled={creatingStaff}
+                    className="h-11 px-6 font-bold text-xs gap-1.5 w-full sm:w-auto"
+                  >
+                    {creatingStaff ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        <span>Creating Staff Account...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="size-4" />
+                        <span>Create Staff Account</span>
+                      </>
+                    )}
                   </Button>
                 </form>
               </div>
 
-              {/* 3. Staff Onboarding & Password Setup Guide */}
-              <div className="rounded-3xl border border-border bg-card p-6 shadow-xs space-y-3.5">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="size-5 text-primary" />
-                  <h3 className="font-display text-base font-bold text-foreground">Staff Onboarding & Password Guide</h3>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  How newly created staff set their passwords and access the portal:
-                </p>
-
-                <div className="space-y-2.5 text-xs">
-                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
-                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">1</span>
-                    <p className="text-muted-foreground">
-                      <strong className="text-foreground">Official Invitation Email:</strong> The newly created staff member receives a secure invitation link from Supabase Auth.
-                    </p>
+              {/* Right Column: Existing User Role Assignment & Setup Guide */}
+              <div className="space-y-6">
+                {/* 2. Assign Role to Already Registered Account */}
+                <div className="rounded-3xl border border-border bg-card p-6 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="size-5 text-primary" />
+                    <h3 className="font-display text-base font-bold text-foreground">
+                      Assign Role to Existing Account
+                    </h3>
                   </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Grant an administrative role to a user who already has a registered Shipt account.
+                  </p>
 
-                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
-                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">2</span>
-                    <p className="text-muted-foreground">
-                      <strong className="text-foreground">Private Password Setup:</strong> Clicking the link opens <code className="text-primary font-mono font-semibold">/accept-invitation</code>, where they choose their secure password.
-                    </p>
-                  </div>
+                  <form onSubmit={handleAssignRole} className="mt-4 space-y-3.5">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">Registered User Email *</label>
+                      <input
+                        type="email"
+                        required
+                        value={newRoleEmail}
+                        onChange={(e) => setNewRoleEmail(e.target.value)}
+                        placeholder="user@shiptmart.com or staff@shiptmart.com"
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                      />
+                    </div>
 
-                  <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
-                    <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">3</span>
-                    <p className="text-muted-foreground">
-                      <strong className="text-foreground">Immediate Portal Access:</strong> Once saved, they log in at <code className="text-primary font-mono font-semibold">/admin</code> with their assigned role permissions.
-                    </p>
-                  </div>
-                </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-foreground">Role Level *</label>
+                      <select
+                        value={newRoleType}
+                        onChange={(e) => setNewRoleType(e.target.value as AdminRole)}
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
+                      >
+                        <option value="store_manager">Store Manager (Catalog, Stock, Orders)</option>
+                        <option value="owner">Store Owner (Business, Analytics, Private Costs)</option>
+                        <option value="super_admin">Super Administrator (Full System & Security Access)</option>
+                        <option value="block_manager">Block Manager (Assigned Delivery Block Only)</option>
+                      </select>
+                    </div>
 
-                <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
-                  <strong className="text-foreground">Resend Setup Link:</strong> You can resend a password setup email to any staff member using the "Send Password Link" button in the table below.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Current Staff List */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-base font-bold text-foreground">Current Staff & Administrators</h3>
-              <Button variant="outline" size="sm" onClick={loadRoles} className="h-8 gap-1 text-xs">
-                <RefreshCw className={cn("size-3", rolesLoading && "animate-spin")} />
-                <span>Refresh</span>
-              </Button>
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
-                  <tr>
-                    <th className="p-3 font-semibold">Staff Member</th>
-                    <th className="p-3 font-semibold">Assigned Role</th>
-                    <th className="p-3 font-semibold">Scope / Coverage</th>
-                    <th className="p-3 font-semibold">Date Added</th>
-                    <th className="p-3 font-semibold text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {rolesList.map((r) => (
-                    <tr key={`${r.user_id}-${r.role}`} className="hover:bg-secondary/20">
-                      <td className="p-3 font-medium text-foreground">
-                        <div className="flex items-center gap-2">
-                          <div>
-                            {r.full_name && (
-                              <div className="font-semibold text-foreground">{r.full_name}</div>
-                            )}
-                            <div className="font-mono text-[11px] text-muted-foreground">{r.email || r.user_id}</div>
-                          </div>
-                          {r.user_id === session?.user?.id && (
-                            <Badge variant="outline" className="text-[10px] border-primary/30 text-primary shrink-0">
-                              You
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "capitalize font-bold text-[11px]",
-                            getRoleBadge(r.role).className
-                          )}
+                    {newRoleType === "block_manager" && (
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-foreground">
+                          Assigned Delivery Block *
+                        </label>
+                        <select
+                          value={newRoleBlock}
+                          onChange={(e) => setNewRoleBlock(e.target.value)}
+                          required
+                          className="h-10 w-full rounded-xl border border-input bg-card px-3.5 text-xs outline-none focus:border-primary"
                         >
-                          {getRoleBadge(r.role).label}
-                        </Badge>
-                      </td>
-                      <td className="p-3">
-                        {r.role === "block_manager" ? (
-                          <Badge variant="outline" className="border-purple-500/30 text-purple-700 bg-purple-500/10 text-[11px] font-semibold dark:text-purple-300">
-                            <Building2 className="size-3 mr-1 inline-block" />
-                            {r.assigned_block || "Unassigned"}
-                          </Badge>
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground font-medium">All Blocks / Store-wide</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-muted-foreground">
-                        {r.created_at ? new Date(r.created_at).toLocaleDateString() : "Initial"}
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {r.email && r.email.includes("@") && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={sendingPasswordResetEmail === r.email}
-                              onClick={() => handleSendStaffPasswordSetup(r.email)}
-                              className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/10"
-                              title={`Send password setup email to ${r.email}`}
-                            >
-                              {sendingPasswordResetEmail === r.email ? (
-                                <Loader2 className="size-3 animate-spin" />
-                              ) : (
-                                <Mail className="size-3" />
-                              )}
-                              <span>Send Password Link</span>
-                            </Button>
-                          )}
+                          {availableBlocks.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name} ({b.id})
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Restricts this administrator's view and operations to this delivery block.
+                        </p>
+                      </div>
+                    )}
 
-                          {r.user_id !== session?.user?.id && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleRevokeRole(r.user_id, r.role)}
-                              className="h-7 text-xs text-destructive hover:bg-destructive/10"
-                            >
-                              <UserX className="size-3.5 mr-1" />
-                              <span>Revoke</span>
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    <Button type="submit" variant="outline" disabled={assigningRole} className="h-10 px-5 font-bold text-xs">
+                      {assigningRole ? <Loader2 className="size-4 animate-spin" /> : "Assign Staff Role"}
+                    </Button>
+                  </form>
+                </div>
 
-          {/* Protected Security Audit Trail */}
-          <div className="space-y-3 pt-4 border-t border-border/60">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ScrollText className="size-4 text-primary" />
-                <h3 className="font-display text-base font-bold text-foreground">Security Audit Trail</h3>
-                <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary">
-                  Protected Log
-                </Badge>
+                {/* 3. Staff Onboarding & Password Setup Guide */}
+                <div className="rounded-3xl border border-border bg-card p-6 shadow-xs space-y-3.5">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="size-5 text-primary" />
+                    <h3 className="font-display text-base font-bold text-foreground">Staff Onboarding & Password Guide</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    How newly created staff set their passwords and access the portal:
+                  </p>
+
+                  <div className="space-y-2.5 text-xs">
+                    <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                      <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">1</span>
+                      <p className="text-muted-foreground">
+                        <strong className="text-foreground">Official Invitation Email:</strong> The newly created staff member receives a secure invitation link from Supabase Auth.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                      <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">2</span>
+                      <p className="text-muted-foreground">
+                        <strong className="text-foreground">Private Password Setup:</strong> Clicking the link opens <code className="text-primary font-mono font-semibold">/accept-invitation</code>, where they choose their secure password.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border/70 bg-secondary/30 p-2.5 flex items-start gap-2.5">
+                      <span className="grid size-4 shrink-0 place-items-center rounded-full bg-primary text-[10px] text-primary-foreground font-bold mt-0.5">3</span>
+                      <p className="text-muted-foreground">
+                        <strong className="text-foreground">Immediate Portal Access:</strong> Once saved, they log in at <code className="text-primary font-mono font-semibold">/admin</code> with their assigned role permissions.
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+                    <strong className="text-foreground">Resend Setup Link:</strong> You can resend a password setup email to any staff member using the "Send Password Link" button in the table below.
+                  </p>
+                </div>
               </div>
-              <Button variant="outline" size="sm" onClick={loadRoles} className="h-8 gap-1 text-xs">
-                <RefreshCw className={cn("size-3", auditLogsLoading && "animate-spin")} />
-                <span>Refresh Logs</span>
-              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Immutable log of administrative grants, role changes, revocations, and block assignments.
-            </p>
 
-            <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
-                  <tr>
-                    <th className="p-3 font-semibold">Timestamp</th>
-                    <th className="p-3 font-semibold">Action</th>
-                    <th className="p-3 font-semibold">Target / Details</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {auditLogs.length === 0 ? (
+            {/* Current Staff List */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-base font-bold text-foreground">Current Staff & Administrators</h3>
+                <Button variant="outline" size="sm" onClick={loadRoles} className="h-8 gap-1 text-xs">
+                  <RefreshCw className={cn("size-3", rolesLoading && "animate-spin")} />
+                  <span>Refresh</span>
+                </Button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
                     <tr>
-                      <td colSpan={3} className="p-6 text-center text-xs text-muted-foreground">
-                        {auditLogsLoading ? "Loading audit logs..." : "No administrative audit log entries recorded yet."}
-                      </td>
+                      <th className="p-3 font-semibold">Staff Member</th>
+                      <th className="p-3 font-semibold">Assigned Role</th>
+                      <th className="p-3 font-semibold">Scope / Coverage</th>
+                      <th className="p-3 font-semibold">Date Added</th>
+                      <th className="p-3 font-semibold text-right">Actions</th>
                     </tr>
-                  ) : (
-                    auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-secondary/20">
-                        <td className="p-3 whitespace-nowrap text-muted-foreground font-mono text-[11px]">
-                          {new Date(log.created_at).toLocaleString()}
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {rolesList.map((r) => (
+                      <tr key={`${r.user_id}-${r.role}`} className="hover:bg-secondary/20">
+                        <td className="p-3 font-medium text-foreground">
+                          <div className="flex items-center gap-2">
+                            <div>
+                              {r.full_name && (
+                                <div className="font-semibold text-foreground">{r.full_name}</div>
+                              )}
+                              <div className="font-mono text-[11px] text-muted-foreground">{r.email || r.user_id}</div>
+                            </div>
+                            {r.user_id === session?.user?.id && (
+                              <Badge variant="outline" className="text-[10px] border-primary/30 text-primary shrink-0">
+                                You
+                              </Badge>
+                            )}
+                          </div>
                         </td>
-                        <td className="p-3 whitespace-nowrap">
-                          <Badge variant="outline" className="font-mono text-[10px] uppercase">
-                            {log.action}
+                        <td className="p-3">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize font-bold text-[11px]",
+                              getRoleBadge(r.role).className
+                            )}
+                          >
+                            {getRoleBadge(r.role).label}
                           </Badge>
                         </td>
-                        <td className="p-3 text-foreground font-mono text-[11px]">
-                          {log.details ? (
-                            <span className="break-all">{JSON.stringify(log.details)}</span>
+                        <td className="p-3">
+                          {r.role === "block_manager" ? (
+                            <Badge variant="outline" className="border-purple-500/30 text-purple-700 bg-purple-500/10 text-[11px] font-semibold dark:text-purple-300">
+                              <Building2 className="size-3 mr-1 inline-block" />
+                              {r.assigned_block || "Unassigned"}
+                            </Badge>
                           ) : (
-                            <span className="text-muted-foreground">Target: {log.target_user_id || "System"}</span>
+                            <span className="text-[11px] text-muted-foreground font-medium">All Blocks / Store-wide</span>
                           )}
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {r.created_at ? new Date(r.created_at).toLocaleDateString() : "Initial"}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {r.email && r.email.includes("@") && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={sendingPasswordResetEmail === r.email}
+                                onClick={() => handleSendStaffPasswordSetup(r.email)}
+                                className="h-7 text-xs gap-1 border-primary/30 text-primary hover:bg-primary/10"
+                                title={`Send password setup email to ${r.email}`}
+                              >
+                                {sendingPasswordResetEmail === r.email ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <Mail className="size-3" />
+                                )}
+                                <span>Send Password Link</span>
+                              </Button>
+                            )}
+
+                            {r.user_id !== session?.user?.id && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRevokeRole(r.user_id, r.role)}
+                                className="h-7 text-xs text-destructive hover:bg-destructive/10"
+                              >
+                                <UserX className="size-3.5 mr-1" />
+                                <span>Revoke</span>
+                              </Button>
+                            )}
+                          </div>
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Protected Security Audit Trail */}
+            <div className="space-y-3 pt-4 border-t border-border/60">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ScrollText className="size-4 text-primary" />
+                  <h3 className="font-display text-base font-bold text-foreground">Security Audit Trail</h3>
+                  <Badge variant="outline" className="text-[10px] font-semibold border-primary/30 text-primary">
+                    Protected Log
+                  </Badge>
+                </div>
+                <Button variant="outline" size="sm" onClick={loadRoles} className="h-8 gap-1 text-xs">
+                  <RefreshCw className={cn("size-3", auditLogsLoading && "animate-spin")} />
+                  <span>Refresh Logs</span>
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Immutable log of administrative grants, role changes, revocations, and block assignments.
+              </p>
+
+              <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border bg-secondary/50 text-muted-foreground">
+                    <tr>
+                      <th className="p-3 font-semibold">Timestamp</th>
+                      <th className="p-3 font-semibold">Action</th>
+                      <th className="p-3 font-semibold">Target / Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {auditLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="p-6 text-center text-xs text-muted-foreground">
+                          {auditLogsLoading ? "Loading audit logs..." : "No administrative audit log entries recorded yet."}
+                        </td>
+                      </tr>
+                    ) : (
+                      auditLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-secondary/20">
+                          <td className="p-3 whitespace-nowrap text-muted-foreground font-mono text-[11px]">
+                            {new Date(log.created_at).toLocaleString()}
+                          </td>
+                          <td className="p-3 whitespace-nowrap">
+                            <Badge variant="outline" className="font-mono text-[10px] uppercase">
+                              {log.action}
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-foreground font-mono text-[11px]">
+                            {log.details ? (
+                              <span className="break-all">{JSON.stringify(log.details)}</span>
+                            ) : (
+                              <span className="text-muted-foreground">Target: {log.target_user_id || "System"}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* TAB 5: STORE BRANDING SETTINGS (Super Admin & Owner) */}
       {activeTab === "branding" && canManageBranding(adminRole) && (
@@ -3386,7 +3710,7 @@ function AdminPortalInner() {
           </Button>
           <StoreBrandingTab
             adminRole={adminRole}
-            onNavigateStorefront={() => {}}
+            onNavigateStorefront={() => { }}
           />
         </div>
       )}
@@ -3501,7 +3825,7 @@ function AdminPortalInner() {
               </Button>
               <StoreBrandingTab
                 adminRole={adminRole}
-                onNavigateStorefront={() => {}}
+                onNavigateStorefront={() => { }}
               />
             </div>
           )}
@@ -3531,6 +3855,13 @@ function AdminPortalInner() {
                 </div>
               )}
             </div>
+          )}
+
+          {settingsSubView === "students" && (
+            <StudentPaymentPoliciesView
+              adminRole={adminRole}
+              onBackToSettings={() => setSettingsSubView("hub")}
+            />
           )}
         </div>
       )}

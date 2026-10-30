@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { Search, PackageCheck, Clock, CheckCircle2, AlertCircle, Loader2, ArrowRight, User } from "lucide-react";
+import { Search, PackageCheck, Clock, CheckCircle2, AlertCircle, Loader2, ArrowRight, User, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { trackGuestOrder, resolveOrderItemImage, BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
+import { customerCancelOrder } from "@/lib/studentPaymentApi";
 import { useCustomerAuth } from "@/lib/auth";
 import { formatINR } from "@/data/products";
 import type { TrackedOrder } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 const STATUS_STEPS = [
   { key: "placed", label: "Placed" },
@@ -30,6 +32,38 @@ export function OrderTrackerModal({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [order, setOrder] = useState<TrackedOrder | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("Ordered by mistake");
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const isEligibleToCancel = order
+    ? ["placed", "confirmed", "preparing"].includes(order.status.toLowerCase())
+    : false;
+
+  const handleGuestCancelOrder = async () => {
+    if (!order) return;
+    setIsCancelling(true);
+    try {
+      const res = await customerCancelOrder(order.order_number, {
+        guestToken: trackingToken.trim(),
+        reason: cancelReason,
+      });
+
+      if (!res.success) {
+        toast.error(res.error || "Failed to cancel order.");
+        setIsCancelling(false);
+        return;
+      }
+
+      toast.success(`Order #${order.order_number} cancelled successfully.`);
+      setOrder((prev) => (prev ? { ...prev, status: "cancelled" } : null));
+      setShowCancelConfirm(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to cancel order.");
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   const handleTrack = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,8 +298,116 @@ export function OrderTrackerModal({
                 </div>
               </div>
             )}
+
+            {/* Guest Order Cancellation Action */}
+            {isEligibleToCancel && (
+              <div className="mt-5 border-t border-border/60 pt-4 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Need to cancel this order?</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCancelConfirm(true)}
+                  className="h-8 gap-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                >
+                  <X className="size-3.5" />
+                  <span>Cancel Order</span>
+                </Button>
+              </div>
+            )}
+
+            {["out_for_delivery", "ready_for_pickup"].includes(order.status.toLowerCase()) && (
+              <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                <Clock className="size-4 shrink-0" />
+                <span>Order has passed customer cancellation cutoff (already dispatched or ready at counter).</span>
+              </div>
+            )}
           </div>
         )}
+
+        {/* Confirmation Modal for Guest Order Cancellation */}
+        <Dialog open={showCancelConfirm} onOpenChange={(open) => !isCancelling && setShowCancelConfirm(open)}>
+          <DialogContent className="max-w-md rounded-3xl p-6">
+            <DialogHeader>
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="size-5 shrink-0" />
+                <DialogTitle className="font-display text-lg font-bold">
+                  Cancel Order #{order?.order_number}?
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-xs text-muted-foreground pt-1">
+                Are you sure you want to cancel this order? This action cannot be undone by the customer.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 pt-2">
+              <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-1">
+                <p className="font-semibold text-foreground">Verified Guest Authorization</p>
+                <p className="text-muted-foreground text-[11px]">
+                  Cancellation is authenticated using your secret guest tracking token.
+                </p>
+                {(order?.payment_status === "paid" || order?.payment_status === "completed") ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 pt-1 font-medium border-t border-border/60">
+                    💡 Verified Payment: Your {order?.payment_method?.toUpperCase()} payment will be reviewed by campus management for refund.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground pt-1 border-t border-border/60">
+                    💡 Stock Notice: Unpaid items will be released back into catalogue stock immediately.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-foreground mb-1 block">Reason for cancellation:</label>
+                <select
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  disabled={isCancelling}
+                  className="h-9 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                >
+                  <option value="Ordered by mistake">Ordered by mistake</option>
+                  <option value="Change of delivery details">Change of delivery location</option>
+                  <option value="Delivery time too long">Delivery time too long</option>
+                  <option value="Found alternative on campus">Found alternative on campus</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isCancelling}
+                  onClick={() => setShowCancelConfirm(false)}
+                  className="text-xs font-semibold"
+                >
+                  Keep Order
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isCancelling}
+                  onClick={handleGuestCancelOrder}
+                  className="h-8 gap-1.5 text-xs font-bold"
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>Cancelling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <X className="size-3.5" />
+                      <span>Confirm Cancellation</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

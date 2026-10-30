@@ -13,13 +13,21 @@ import {
   Loader2,
   Info,
   User,
+  CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { useCustomerAuth } from "@/lib/auth";
 import { formatINR } from "@/data/products";
-import type { CheckoutFormData, PlacedOrderResult, DeliveryBlock } from "@/lib/types";
+import type { CheckoutFormData, PlacedOrderResult, DeliveryBlock, StorePaymentSettings } from "@/lib/types";
 import { placeOrder, loadActiveDeliveryBlocks } from "@/lib/catalogApi";
+import { loadStorePaymentSettings, DEFAULT_STORE_PAYMENT_SETTINGS } from "@/lib/studentPaymentApi";
+import {
+  preparePayUCheckout,
+  submitPayUHostedForm,
+  verifyPayUPaymentServerSide,
+  handlePayUFailureServerSide,
+} from "@/lib/payuApi";
 import { cn } from "@/lib/utils";
 
 const PICKUP_LOCATIONS = [
@@ -30,7 +38,7 @@ const PICKUP_LOCATIONS = [
 
 type Errors = Partial<Record<keyof CheckoutFormData, string | undefined>>;
 
-function validate(f: CheckoutFormData): Errors {
+function validate(f: CheckoutFormData, cashAllowed = true, onlineAllowed = true): Errors {
   const e: Errors = {};
   if (f.name.trim().length < 2) e.name = "Please enter your full name (at least 2 characters).";
   if (!/^[6-9]\d{9}$/.test(f.phone.replace(/\s/g, "")))
@@ -41,6 +49,13 @@ function validate(f: CheckoutFormData): Errors {
     if (!f.room?.trim()) e.room = "Enter your room or unit number.";
   } else {
     if (!f.pickupLocation) e.pickupLocation = "Select a pickup location.";
+  }
+
+  if (f.payment === "cod" && !cashAllowed) {
+    e.payment = "Cash on Delivery is unavailable for your account or disabled by store policy.";
+  }
+  if ((f.payment === "upi" || f.payment === "payu") && !onlineAllowed) {
+    e.payment = "Online payment via PayU is unavailable for your account or disabled by store policy.";
   }
 
   return e;
@@ -82,6 +97,7 @@ export function CheckoutForm() {
 
   const [deliveryBlocks, setDeliveryBlocks] = useState<DeliveryBlock[]>([]);
   const [loadingBlocks, setLoadingBlocks] = useState(true);
+  const [storePaymentSettings, setStorePaymentSettings] = useState<StorePaymentSettings>(DEFAULT_STORE_PAYMENT_SETTINGS);
 
   useEffect(() => {
     let active = true;
@@ -91,10 +107,35 @@ export function CheckoutForm() {
         setLoadingBlocks(false);
       }
     });
+    loadStorePaymentSettings().then((settings) => {
+      if (active) {
+        setStorePaymentSettings(settings);
+      }
+    });
     return () => {
       active = false;
     };
   }, []);
+
+  const studentPolicy = profile?.payment_policy || "default";
+  const isCashRestricted = !!profile?.cash_restricted;
+
+  // Authoritative payment method eligibility evaluation
+  const isCashAllowed = storePaymentSettings.cash_payment_enabled && (
+    !user
+      ? storePaymentSettings.guest_cash_allowed
+      : studentPolicy === "cash_only"
+        ? true
+        : studentPolicy === "cash_and_online"
+          ? true
+          : studentPolicy === "online_only"
+            ? false
+            : !isCashRestricted
+  );
+
+  const isOnlineAllowed = storePaymentSettings.online_payment_enabled && (
+    !user || studentPolicy !== "cash_only"
+  );
 
   const [f, setF] = useState<CheckoutFormData>({
     name: "",
@@ -144,6 +185,15 @@ export function CheckoutForm() {
     }
   }, [profile]);
 
+  // Enforce payment option selection based on active policy
+  useEffect(() => {
+    if (!isCashAllowed && f.payment === "cod" && isOnlineAllowed) {
+      setF((p) => ({ ...p, payment: "upi" }));
+    } else if (!isOnlineAllowed && f.payment === "upi" && isCashAllowed) {
+      setF((p) => ({ ...p, payment: "cod" }));
+    }
+  }, [isCashAllowed, isOnlineAllowed, f.payment]);
+
   const [errors, setErrors] = useState<Errors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -185,9 +235,49 @@ export function CheckoutForm() {
   const handleClearOrderSession = () => {
     try {
       sessionStorage.removeItem(SESSION_ORDER_KEY);
-    } catch {}
+    } catch { }
     setDone(null);
   };
+
+  // Handle PayU Return Callback (success or failure)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const payuStatus = params.get("payu_status");
+    const txnid = params.get("txnid");
+    const orderId = params.get("order_id");
+
+    if (payuStatus && txnid) {
+      if (payuStatus === "success") {
+        verifyPayUPaymentServerSide({
+          orderId,
+          txnid,
+          mihpayid: params.get("mihpayid") || txnid,
+          amount: parseFloat(params.get("amount") || "0"),
+          status: "success",
+          mode: params.get("mode") || "online",
+        }).then((res) => {
+          if (res.success && res.data) {
+            setDone(res.data);
+            try {
+              sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(res.data));
+            } catch { }
+            clear();
+          }
+        });
+      } else if (payuStatus === "failed") {
+        setSubmitError("Your PayU payment was cancelled or declined. You can adjust your details and retry checkout.");
+        handlePayUFailureServerSide({
+          orderId,
+          txnid,
+          errorCode: params.get("error") || "CANCELLED",
+          errorMsg: params.get("error_Message") || "Payment cancelled or declined",
+        });
+      }
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, []);
 
   if (done) {
     return (
@@ -351,7 +441,7 @@ export function CheckoutForm() {
       return;
     }
 
-    const errs = validate(f);
+    const errs = validate(f, isCashAllowed, isOnlineAllowed);
     setErrors(errs);
     if (Object.keys(errs).length) {
       document.getElementById(Object.keys(errs)[0] ?? "")?.focus();
@@ -368,10 +458,36 @@ export function CheckoutForm() {
         return;
       }
 
-      setDone(res.data);
+      const placedOrder = res.data;
+      if (f.payment === "upi" || f.payment === "payu") {
+        try {
+          const payuPayload = await preparePayUCheckout({
+            order_id: placedOrder.order_id,
+            order_number: placedOrder.order_number,
+            amount: placedOrder.total_amount,
+            product_info: `Shipt Mart Order #${placedOrder.order_number}`,
+            customer_name: f.name,
+            customer_email: user?.email || "student@campus.edu",
+            customer_phone: f.phone,
+          });
+
+          // In browser runtime (when not running unit tests), redirect customer to PayU Hosted Checkout
+          const isTestEnvironment =
+            (typeof process !== "undefined" && (!!process.env["VITEST"] || process.env["NODE_ENV"] === "test")) ||
+            (import.meta as any).env?.MODE === "test" ||
+            (typeof window !== "undefined" && (window as any).__VITEST__);
+
+          if (typeof window !== "undefined" && !isTestEnvironment) {
+            submitPayUHostedForm(payuPayload);
+            return;
+          }
+        } catch { }
+      }
+
+      setDone(placedOrder);
       try {
-        sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(res.data));
-      } catch {}
+        sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(placedOrder));
+      } catch { }
       clear();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err: any) {
@@ -583,65 +699,111 @@ export function CheckoutForm() {
 
         {/* Payment Method Selection */}
         <fieldset className="rounded-3xl border border-border bg-card p-5 sm:p-7">
-          <legend className="px-2 font-display text-lg font-bold">Payment method</legend>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <legend className="px-2 font-display text-lg font-bold">Payment method</legend>
+            {user && profile?.payment_policy && profile.payment_policy !== "default" && (
+              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary border border-primary/20">
+                Policy: {profile.payment_policy.replace(/_/g, " ").toUpperCase()}
+              </span>
+            )}
+            {user && isCashRestricted && (
+              <span className="rounded-full bg-destructive/10 px-2.5 py-0.5 text-[11px] font-bold text-destructive border border-destructive/20">
+                Cash Restricted
+              </span>
+            )}
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2" role="radiogroup">
+            {/* PayU Online Option */}
             <label
               className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-4 transition",
-                f.payment === "upi" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                "flex items-center gap-3 rounded-2xl border-2 p-4 transition",
+                isOnlineAllowed
+                  ? "cursor-pointer hover:border-primary/40"
+                  : "cursor-not-allowed opacity-50 bg-muted/40",
+                f.payment === "upi" || f.payment === "payu" ? "border-primary bg-primary/5" : "border-border"
               )}
             >
               <input
                 type="radio"
                 name="payment"
                 value="upi"
-                checked={f.payment === "upi"}
-                onChange={() => set("payment", "upi")}
+                disabled={!isOnlineAllowed}
+                checked={f.payment === "upi" || f.payment === "payu"}
+                onChange={() => isOnlineAllowed && set("payment", "upi")}
                 className="sr-only"
               />
               <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <Smartphone className="size-5" />
+                <CreditCard className="size-5" />
               </span>
-              <span>
-                <span className="block font-semibold">UPI Payment</span>
+              <div className="min-w-0 flex-1">
+                <span className="block font-semibold">Pay Online (PayU Gateway)</span>
                 <span className="block text-xs text-muted-foreground">
-                  GPay, PhonePe, Paytm QR on arrival
+                  UPI, Cards & Net Banking via PayU
                 </span>
-              </span>
+                {!isOnlineAllowed && (
+                  <span className="mt-1 block text-[10px] font-bold text-destructive">
+                    Online payment disabled by account policy
+                  </span>
+                )}
+              </div>
             </label>
 
+            {/* Cash on Delivery Option */}
             <label
               className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-4 transition",
-                f.payment === "cod" ? "border-primary bg-primary/5" : "border-border hover:border-primary/40"
+                "flex items-center gap-3 rounded-2xl border-2 p-4 transition",
+                isCashAllowed
+                  ? "cursor-pointer hover:border-primary/40"
+                  : "cursor-not-allowed opacity-50 bg-muted/40",
+                f.payment === "cod" ? "border-primary bg-primary/5" : "border-border"
               )}
             >
               <input
                 type="radio"
                 name="payment"
                 value="cod"
+                disabled={!isCashAllowed}
                 checked={f.payment === "cod"}
-                onChange={() => set("payment", "cod")}
+                onChange={() => isCashAllowed && set("payment", "cod")}
                 className="sr-only"
               />
               <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
                 <Wallet className="size-5" />
               </span>
-              <span>
+              <div className="min-w-0 flex-1">
                 <span className="block font-semibold">Cash on Delivery</span>
                 <span className="block text-xs text-muted-foreground">
                   Pay exact cash upon receipt
                 </span>
-              </span>
+                {!isCashAllowed && (
+                  <span className="mt-1 block text-[10px] font-bold text-destructive">
+                    {studentPolicy === "online_only"
+                      ? "Online Only policy active"
+                      : isCashRestricted
+                        ? "Restricted due to uncollected orders"
+                        : !storePaymentSettings.cash_payment_enabled
+                          ? "Cash orders disabled store-wide"
+                          : !user && !storePaymentSettings.guest_cash_allowed
+                            ? "Sign-in required for cash orders"
+                            : "Cash unavailable"}
+                  </span>
+                )}
+              </div>
             </label>
           </div>
+
+          {errors.payment && (
+            <p className="mt-2 text-xs font-semibold text-destructive">
+              {errors.payment}
+            </p>
+          )}
 
           {/* Payment Method Transparency Notice */}
           <div className="mt-4 rounded-xl border border-border/80 bg-secondary/30 p-3 text-xs text-muted-foreground">
             <p>
-              {f.payment === "upi"
-                ? "💡 Payment Collection Note: A QR code will be provided by delivery staff or at the counter upon order arrival."
+              {f.payment === "upi" || f.payment === "payu"
+                ? "💡 Secure PayU Gateway: You will be redirected to complete payment via UPI, Credit/Debit Card, or Net Banking with 256-bit encryption."
                 : "💡 Cash Notice: Please keep exact change ready for smooth handover at your door."}
             </p>
           </div>

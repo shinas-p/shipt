@@ -298,12 +298,16 @@ export function BannerCarousel() {
               aria-label={`Promotional banner: ${banner.title}`}
               data-carousel-slide={idx}
             >
-              {/* Full Available Background Image */}
+              {/* Full Available Background Image with high-priority LCP preloading & explicit dimensions */}
               <img
                 src={banner.image_url}
                 alt={banner.title}
-                className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105"
+                width={1200}
+                height={450}
+                fetchPriority={idx === 0 ? "high" : "auto"}
                 loading={idx === 0 ? "eager" : "lazy"}
+                decoding={idx === 0 ? "sync" : "async"}
+                className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-700 ease-out group-hover:scale-105"
                 onError={(e) => {
                   e.currentTarget.src = promoImg;
                 }}

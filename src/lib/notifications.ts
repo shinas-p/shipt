@@ -14,7 +14,15 @@ export type NotificationEventType =
   | "payment_attention"
   | "new_suggestion"
   | "low_stock"
-  | "system_alert";
+  | "system_alert"
+  | "payment_initiated"
+  | "payment_success"
+  | "payment_failed"
+  | "payment_pending_timeout"
+  | "payment_suspicious_callback"
+  | "refund_requested"
+  | "refund_status_changed"
+  | "order_status_changed";
 
 export interface AdminNotification {
   id: string;

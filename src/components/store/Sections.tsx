@@ -19,10 +19,10 @@ type SortOption = "popular" | "price-asc" | "price-desc" | "name";
 type FilterOption = "all" | "in-stock" | "bestseller" | "new";
 
 export function CategoryGrid() {
-  const { category, setCategory, categories, products } = useStore();
+  const { category, setCategory, categories, products, isLoadingCatalog } = useStore();
 
-  // If there are no active products in the store, hide the category bar to keep storefront clean
-  if (products.length === 0) return null;
+  // If loading is complete and there are genuinely no products, hide the category bar to keep storefront clean
+  if (!isLoadingCatalog && products.length === 0) return null;
 
   return (
     <section id="categories" className="container-page py-3 sm:py-4">
@@ -90,6 +90,23 @@ export function CategoryGrid() {
         })}
       </div>
     </section>
+  );
+}
+
+export function ProductCardSkeleton() {
+  return (
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
+      <div className="relative aspect-square w-full overflow-hidden bg-muted animate-pulse" />
+      <div className="flex flex-1 flex-col gap-1.5 p-3 sm:p-4">
+        <div className="h-3 w-16 rounded bg-muted animate-pulse" />
+        <div className="h-4 w-4/5 rounded bg-muted animate-pulse mt-0.5" />
+        <div className="h-3 w-20 rounded bg-muted/80 animate-pulse mt-0.5" />
+        <div className="mt-auto flex items-end justify-between gap-2 pt-2">
+          <div className="h-5 w-14 rounded bg-muted animate-pulse" />
+          <div className="h-9 w-20 rounded-full bg-muted animate-pulse" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -164,13 +181,34 @@ export function ProductGrid() {
     );
   }
 
-  // 2. Loading state on cold start
+  // 2. Loading state on cold start: stable skeleton layout preventing layout shifts (CLS < 0.1)
   if (isLoadingCatalog && products.length === 0) {
     return (
-      <section id="shop" className="container-page scroll-mt-24 py-8 sm:py-12">
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <section id="shop" className="container-page scroll-mt-24 py-4 sm:py-6" aria-busy="true" aria-label="Loading products">
+        {/* Skeleton Category Pills & Filters Bar matching real layout */}
+        <div className="flex flex-col gap-3 border-b border-border/80 pb-4">
+          <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0">
+            <div className="inline-flex h-8 w-20 shrink-0 rounded-full bg-primary/20 animate-pulse" />
+            {categories.slice(0, 5).map((c) => (
+              <div key={c.id} className="inline-flex h-8 w-24 shrink-0 rounded-full bg-secondary/80 animate-pulse" />
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-2">
+              <div className="h-7 w-32 rounded-lg bg-muted animate-pulse" />
+              <div className="h-5 w-8 rounded-full bg-secondary animate-pulse" />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-20 rounded-full bg-muted/60 animate-pulse" />
+              <div className="h-8 w-24 rounded-full bg-muted/60 animate-pulse" />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="h-64 rounded-2xl bg-muted/60 animate-pulse" />
+            <ProductCardSkeleton key={i} />
           ))}
         </div>
       </section>

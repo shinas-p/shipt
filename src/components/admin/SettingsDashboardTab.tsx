@@ -43,7 +43,8 @@ export type SettingsSubView =
   | "banners"
   | "roles"
   | "tab_visibility"
-  | "push";
+  | "push"
+  | "students";
 
 interface SettingsDashboardTabProps {
   adminRole: AdminRole | null;
@@ -177,6 +178,18 @@ export function SettingsDashboardTab({
       authorized: true, // Any authorized admin can register/manage their device push notifications
       targetView: "push" as SettingsSubView,
       badge: "Real-time Push",
+    },
+    {
+      id: "students",
+      title: "Student Payment Policies & Trust",
+      icon: Users,
+      iconColor: "text-indigo-600 bg-indigo-500/10",
+      description: "Configure individual student payment policies (Online Only, Cash restrictions), manage fake cash order prevention, and review uncollected orders.",
+      details: "Payment eligibility, student directory, uncollected orders & audit logs",
+      actionLabel: "Manage Student Policies",
+      authorized: canAccessSettings(adminRole),
+      targetView: "students" as SettingsSubView,
+      badge: "Payment Controls",
     },
   ];
 

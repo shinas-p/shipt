@@ -27,13 +27,16 @@ import {
   ChevronRight,
   X,
   FileText,
+  Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCustomerAuth, type CustomerOrderSummary } from "@/lib/auth";
+import { useCustomerNotifications } from "@/lib/customerNotificationsApi";
 import { useBranding } from "@/lib/branding";
+import { customerCancelOrder } from "@/lib/studentPaymentApi";
 import { formatINR, BRAND_NAME } from "@/data/products";
 import { resolveOrderItemImage, BRAND_FALLBACK_IMAGE } from "@/lib/catalogApi";
 import { isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
@@ -75,15 +78,54 @@ function getStatusBadge(status: string) {
       return <Badge className="bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25 border-emerald-600/20">Delivered</Badge>;
     case "out_for_delivery":
       return <Badge className="bg-indigo-600/15 text-indigo-700 hover:bg-indigo-600/25 border-indigo-600/20">Out for Delivery</Badge>;
+    case "ready_for_pickup":
+      return <Badge className="bg-cyan-600/15 text-cyan-700 hover:bg-cyan-600/25 border-cyan-600/20">Ready for Pickup</Badge>;
     case "preparing":
       return <Badge className="bg-purple-600/15 text-purple-700 hover:bg-purple-600/25 border-purple-600/20">Preparing</Badge>;
     case "confirmed":
       return <Badge className="bg-blue-600/15 text-blue-700 hover:bg-blue-600/25 border-blue-600/20">Confirmed</Badge>;
+    case "pending_payment":
+      return <Badge variant="outline" className="text-amber-700 border-amber-600/40 bg-amber-500/10">Pending Payment</Badge>;
     case "cancelled":
       return <Badge variant="destructive">Cancelled</Badge>;
     default:
       return <Badge variant="outline" className="text-amber-700 border-amber-600/30 bg-amber-500/10">Order Placed</Badge>;
   }
+}
+
+function getPaymentStatusBadge(paymentStatus?: string, paymentMethod?: string) {
+  const ps = (paymentStatus || "pending").toLowerCase();
+  switch (ps) {
+    case "paid":
+    case "completed":
+      return (
+        <Badge className="bg-emerald-600/15 text-emerald-700 hover:bg-emerald-600/25 border-emerald-600/20 text-[10px]">
+          Paid
+        </Badge>
+      );
+    case "failed":
+      return <Badge variant="destructive" className="text-[10px]">Payment Failed</Badge>;
+    case "expired":
+      return <Badge variant="outline" className="border-amber-500/40 text-amber-700 bg-amber-500/10 text-[10px]">Expired</Badge>;
+    case "refund_pending":
+      return <Badge className="bg-orange-500/15 text-orange-700 border-orange-500/30 text-[10px]">Refund Pending</Badge>;
+    case "refunded":
+      return <Badge className="bg-purple-500/15 text-purple-700 border-purple-500/30 text-[10px]">Refunded</Badge>;
+    case "processing":
+      return <Badge className="bg-blue-500/15 text-blue-700 border-blue-500/30 text-[10px]">Processing</Badge>;
+    case "pending":
+    default:
+      return (
+        <Badge variant="outline" className="text-amber-700 border-amber-600/30 bg-amber-500/10 text-[10px]">
+          {paymentMethod === "cash" ? "Cash on Delivery" : "Payment Pending"}
+        </Badge>
+      );
+  }
+}
+
+function isOrderEligibleForCustomerCancellation(status: string): boolean {
+  const s = status.toLowerCase();
+  return s === "placed" || s === "confirmed" || s === "preparing";
 }
 
 function AccountPage() {
@@ -102,10 +144,18 @@ function AccountPage() {
 
   // Auth tab: "signin" | "signup" | "forgot"
   const [authTab, setAuthTab] = useState<"signin" | "signup" | "forgot">("signin");
-  // Customer dashboard active tab: "orders" | "profile"
+  // Customer dashboard active tab: "orders" | "notifications" | "profile"
   const [activeTab, setActiveTab] = useState<string>("orders");
   const [signUpConfirmationEmail, setSignUpConfirmationEmail] = useState<string | null>(null);
   const [isStaffInviteWelcome, setIsStaffInviteWelcome] = useState(false);
+
+  // Customer In-App Notification Center
+  const {
+    notifications: customerNotifications,
+    unreadCount: customerUnreadCount,
+    markRead: markCustomerNotifRead,
+    markAllRead: markAllCustomerNotifsRead,
+  } = useCustomerNotifications(user?.id);
 
   // Sync active tab with URL search parameter reactively and detect staff invitation / recovery links
   useEffect(() => {
@@ -131,7 +181,7 @@ function AccountPage() {
             el.scrollIntoView({ behavior: "smooth" });
           }
         }, 500);
-      } else if (tabParam === "orders" || tabParam === "profile") {
+      } else if (tabParam === "orders" || tabParam === "profile" || tabParam === "notifications") {
         setActiveTab(tabParam);
       }
     }
@@ -196,6 +246,44 @@ function AccountPage() {
   const [selectedOrder, setSelectedOrder] = useState<CustomerOrderSummary | null>(null);
   const [trackOrderModal, setTrackOrderModal] = useState<CustomerOrderSummary | null>(null);
   const [copiedOrderNumber, setCopiedOrderNumber] = useState<string | null>(null);
+
+  // Customer Order Cancellation state
+  const [orderToCancel, setOrderToCancel] = useState<CustomerOrderSummary | null>(null);
+  const [cancelReason, setCancelReason] = useState("Ordered by mistake");
+  const [cancelCustomReason, setCancelCustomReason] = useState("");
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
+
+  const handleConfirmCancelOrder = async () => {
+    if (!orderToCancel) return;
+    setIsCancellingOrder(true);
+    const finalReason = cancelReason === "Other" && cancelCustomReason.trim()
+      ? cancelCustomReason.trim()
+      : cancelReason;
+
+    try {
+      const res = await customerCancelOrder(orderToCancel.id, { reason: finalReason });
+      if (!res.success) {
+        toast.error(res.error || "Failed to cancel order.");
+        setIsCancellingOrder(false);
+        return;
+      }
+
+      toast.success(`Order #${orderToCancel.order_number} has been cancelled successfully.`);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderToCancel.id ? { ...o, status: "cancelled" } : o))
+      );
+      if (selectedOrder?.id === orderToCancel.id) {
+        setSelectedOrder((prev) => (prev ? { ...prev, status: "cancelled" } : null));
+      }
+      setOrderToCancel(null);
+      setCancelCustomReason("");
+      fetchCustomerOrders().then((updated) => setOrders(updated));
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to cancel order.");
+    } finally {
+      setIsCancellingOrder(false);
+    }
+  };
 
   const handleCopyOrderNumber = (num: string) => {
     navigator.clipboard.writeText(num);
@@ -788,14 +876,26 @@ function AccountPage() {
 
       {/* Account Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-8">
-        <TabsList className="grid w-full max-w-md grid-cols-2 rounded-2xl">
-          <TabsTrigger value="orders" className="rounded-xl font-semibold gap-1.5">
+        <TabsList className="grid w-full max-w-lg grid-cols-3 rounded-2xl">
+          <TabsTrigger value="orders" className="rounded-xl font-semibold gap-1.5 text-xs sm:text-sm">
             <Package className="size-4" />
-            <span>My Orders ({orders.length})</span>
+            <span>Orders ({orders.length})</span>
           </TabsTrigger>
-          <TabsTrigger value="profile" className="rounded-xl font-semibold gap-1.5">
+          <TabsTrigger value="notifications" className="rounded-xl font-semibold gap-1.5 text-xs sm:text-sm relative">
+            <Bell className="size-4" />
+            <span>Alerts</span>
+            {customerUnreadCount > 0 && (
+              <span
+                id="customer-tab-unread-badge"
+                className="ml-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white shadow-xs"
+              >
+                {customerUnreadCount > 99 ? "99+" : customerUnreadCount}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="profile" className="rounded-xl font-semibold gap-1.5 text-xs sm:text-sm">
             <MapPin className="size-4" />
-            <span>Delivery Details</span>
+            <span>Delivery</span>
           </TabsTrigger>
         </TabsList>
 
@@ -923,8 +1023,10 @@ function AccountPage() {
                           </span>
                         </div>
 
-                        <div>
-                          Payment: <strong className="uppercase text-foreground">{order.payment_method}</strong> ({order.payment_status})
+                        <div className="flex items-center gap-1.5">
+                          <CreditCard className="size-3.5 text-primary shrink-0" />
+                          <span className="font-semibold uppercase text-foreground">{order.payment_method}</span>
+                          {getPaymentStatusBadge(order.payment_status, order.payment_method)}
                         </div>
                       </div>
 
@@ -935,6 +1037,23 @@ function AccountPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
+                          {isOrderEligibleForCustomerCancellation(order.status) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setOrderToCancel(order);
+                                setCancelReason("Ordered by mistake");
+                                setCancelCustomReason("");
+                              }}
+                              className="h-9 gap-1 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                            >
+                              <X className="size-3.5" />
+                              <span>Cancel Order</span>
+                            </Button>
+                          )}
+
                           <Button
                             type="button"
                             variant="outline"
@@ -1162,9 +1281,9 @@ function AccountPage() {
                             <span className="text-muted-foreground">Method:</span>
                             <span className="font-bold uppercase text-foreground">{selectedOrder.payment_method}</span>
                           </div>
-                          <div className="flex justify-between">
+                          <div className="flex items-center justify-between">
                             <span className="text-muted-foreground">Payment Status:</span>
-                            <span className="capitalize font-semibold text-foreground">{selectedOrder.payment_status}</span>
+                            <div>{getPaymentStatusBadge(selectedOrder.payment_status, selectedOrder.payment_method)}</div>
                           </div>
                           <div className="flex justify-between pt-2 border-t border-border/60">
                             <span className="text-muted-foreground">Subtotal:</span>
@@ -1182,6 +1301,14 @@ function AccountPage() {
                       </div>
                     </div>
 
+                    {/* Customer Cancellation Notice or Cutoff explanation */}
+                    {selectedOrder.status === "out_for_delivery" || selectedOrder.status === "ready_for_pickup" ? (
+                      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                        <Clock className="size-4 shrink-0" />
+                        <span>Fulfillment cutoff passed: Order is already in transit or ready at the counter. Customer self-service cancellation is closed.</span>
+                      </div>
+                    ) : null}
+
                     {/* Back to My Orders Action & Track Order Action */}
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
                       <Button
@@ -1195,21 +1322,155 @@ function AccountPage() {
                         <span>Back to My Orders</span>
                       </Button>
 
-                      <Button
-                        type="button"
-                        variant="hero"
-                        size="sm"
-                        onClick={() => {
-                          const ord = selectedOrder;
-                          setSelectedOrder(null);
-                          setTrackOrderModal(ord);
-                        }}
-                        className="gap-1.5 text-xs font-bold"
-                      >
-                        <Truck className="size-3.5" />
-                        <span>Track Live Delivery</span>
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {isOrderEligibleForCustomerCancellation(selectedOrder.status) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const ord = selectedOrder;
+                              setOrderToCancel(ord);
+                              setCancelReason("Ordered by mistake");
+                              setCancelCustomReason("");
+                            }}
+                            className="gap-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                          >
+                            <X className="size-3.5" />
+                            <span>Cancel Order</span>
+                          </Button>
+                        )}
+
+                        <Button
+                          type="button"
+                          variant="hero"
+                          size="sm"
+                          onClick={() => {
+                            const ord = selectedOrder;
+                            setSelectedOrder(null);
+                            setTrackOrderModal(ord);
+                          }}
+                          className="gap-1.5 text-xs font-bold"
+                        >
+                          <Truck className="size-3.5" />
+                          <span>Track Live Delivery</span>
+                        </Button>
+                      </div>
                     </div>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* CONFIRMATION DIALOG FOR CUSTOMER ORDER CANCELLATION */}
+          <Dialog
+            open={orderToCancel !== null}
+            onOpenChange={(open) => {
+              if (!open && !isCancellingOrder) {
+                setOrderToCancel(null);
+              }
+            }}
+          >
+            <DialogContent className="max-w-md rounded-3xl p-6 sm:p-8">
+              {orderToCancel && (
+                <div className="space-y-4">
+                  <DialogHeader>
+                    <div className="flex items-center gap-2 text-destructive">
+                      <AlertCircle className="size-5 shrink-0" />
+                      <DialogTitle className="font-display text-xl font-bold">
+                        Cancel Order #{orderToCancel.order_number}?
+                      </DialogTitle>
+                    </div>
+                    <DialogDescription className="text-xs text-muted-foreground pt-1">
+                      Are you sure you want to cancel this order? This action cannot be undone by the customer.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {/* Truthful Payment / Stock status banner */}
+                  <div className="rounded-2xl border border-border bg-secondary/30 p-3.5 text-xs space-y-1.5">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Order Total:</span>
+                      <span className="font-bold text-foreground">{formatINR(orderToCancel.total_amount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Payment Method:</span>
+                      <span className="font-bold uppercase text-foreground">{orderToCancel.payment_method}</span>
+                    </div>
+                    {orderToCancel.payment_method === "upi" && orderToCancel.payment_status === "completed" ? (
+                      <p className="pt-1.5 border-t border-border/60 text-[11px] text-amber-700 dark:text-amber-400 font-medium leading-relaxed">
+                        💡 Verified Payment Notice: Your online payment has been recorded. Our management team will review and process your refund according to bank schedules.
+                      </p>
+                    ) : (
+                      <p className="pt-1.5 border-t border-border/60 text-[11px] text-muted-foreground leading-relaxed">
+                        💡 Stock Notice: No charge was settled. Reserved items will be returned to campus inventory automatically.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Cancellation Reason Selection */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-foreground">
+                      Reason for cancellation (optional):
+                    </label>
+                    <select
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      disabled={isCancellingOrder}
+                      className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                    >
+                      <option value="Ordered by mistake">Ordered by mistake</option>
+                      <option value="Change of delivery room/block">Change of delivery location</option>
+                      <option value="Delivery time too long">Delivery time too long</option>
+                      <option value="Found alternative on campus">Found alternative on campus</option>
+                      <option value="Other">Other reason...</option>
+                    </select>
+
+                    {cancelReason === "Other" && (
+                      <input
+                        type="text"
+                        value={cancelCustomReason}
+                        onChange={(e) => setCancelCustomReason(e.target.value)}
+                        placeholder="Please specify reason..."
+                        disabled={isCancellingOrder}
+                        className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs outline-none focus:border-primary"
+                      />
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-border/60">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isCancellingOrder}
+                      onClick={() => setOrderToCancel(null)}
+                      className="text-xs font-semibold"
+                    >
+                      Keep Order
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={isCancellingOrder}
+                      onClick={handleConfirmCancelOrder}
+                      className="h-9 gap-1.5 text-xs font-bold"
+                    >
+                      {isCancellingOrder ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>Cancelling...</span>
+                        </>
+                      ) : (
+                        <>
+                          <X className="size-3.5" />
+                          <span>Yes, Cancel Order</span>
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
               )}
@@ -1339,7 +1600,132 @@ function AccountPage() {
           </Dialog>
         </TabsContent>
 
-        {/* SAVED DELIVERY DETAILS TAB */}
+        {/* CUSTOMER IN-APP NOTIFICATIONS TAB */}
+        <TabsContent value="notifications" className="mt-6">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="font-display text-lg font-bold text-foreground">Order Alerts & Updates</h2>
+                <p className="text-xs text-muted-foreground">
+                  Stay updated on your PayU payment confirmations, campus prep, and delivery milestones.
+                </p>
+              </div>
+
+              {customerUnreadCount > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={markAllCustomerNotifsRead}
+                  className="h-8 text-xs font-semibold gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
+                  id="customer-mark-all-read-btn"
+                >
+                  <Check className="size-3.5" />
+                  <span>Mark All Read</span>
+                </Button>
+              )}
+            </div>
+
+            {customerNotifications.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-border bg-card p-10 text-center">
+                <Bell className="mx-auto size-12 text-primary/40" />
+                <h3 className="mt-3 font-display text-base font-bold text-foreground">No alerts yet</h3>
+                <p className="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">
+                  When you place an order or complete payment, real-time alerts and delivery notifications will appear right here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3" id="customer-notifications-list">
+                {customerNotifications.map((notif) => {
+                  const isUnread = !notif.is_read;
+                  return (
+                    <div
+                      key={notif.id}
+                      className={cn(
+                        "group rounded-2xl border p-4 sm:p-5 transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5",
+                        isUnread
+                          ? "border-primary/40 bg-primary/5 shadow-2xs"
+                          : "border-border bg-card hover:border-border/80"
+                      )}
+                    >
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <span
+                          className={cn(
+                            "mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl text-xs",
+                            isUnread ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground"
+                          )}
+                        >
+                          <Bell className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-semibold text-sm text-foreground truncate">{notif.title}</h4>
+                            {notif.order_number && (
+                              <Badge variant="outline" className="font-mono text-[10px]">
+                                #{notif.order_number}
+                              </Badge>
+                            )}
+                            {isUnread && (
+                              <span className="size-2 rounded-full bg-primary animate-pulse" />
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{notif.message}</p>
+                          <span className="mt-2 block text-[11px] text-muted-foreground/75">
+                            {new Date(notif.created_at).toLocaleString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        {notif.order_number && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (isUnread) markCustomerNotifRead(notif.id);
+                              const matching = orders.find(
+                                (o) => o.order_number === notif.order_number || o.id === notif.order_id
+                              );
+                              if (matching) {
+                                setTrackOrderModal(matching);
+                              } else {
+                                toast.info(`Order #${notif.order_number}`);
+                              }
+                            }}
+                            className="h-8 px-3 text-xs font-semibold gap-1.5"
+                          >
+                            <Truck className="size-3.5" />
+                            <span>Track</span>
+                          </Button>
+                        )}
+
+                        {isUnread && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => markCustomerNotifRead(notif.id)}
+                            className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            title="Mark as read"
+                          >
+                            <Check className="size-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </TabsContent>
         <TabsContent value="profile" className="mt-6">
           <div className="max-w-xl rounded-3xl border border-border bg-card p-6 shadow-soft sm:p-8">
             <h2 className="font-display text-lg font-bold text-foreground">Saved Delivery Address</h2>

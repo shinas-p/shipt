@@ -31,7 +31,9 @@ export const Route = createFileRoute("/product/$productId")({
   head: ({ params }) => ({
     meta: [
       { title: `Product Details — ${BRAND_NAME}` },
-      { name: "description", content: `View product specifications, fast delivery options, and customer reviews on ${BRAND_NAME}.` },
+      { name: "description", content: `View product specifications, pricing, stock availability, and customer reviews on ${BRAND_NAME}. Everyday campus essentials delivered straight to your hostel room.` },
+      { property: "og:type", content: "product" },
+      { property: "og:site_name", content: "Shipz Mart" },
     ],
   }),
   component: ProductDetailPage,
@@ -171,8 +173,88 @@ function ProductDetailPage() {
     : 0;
   const categoryObj = categories.find((c) => c.id === product.category);
 
+  // Structured Data (JSON-LD) for Rich Google Snippets
+  const productJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    image: product.image.startsWith("http") ? product.image : `https://www.shipz.store${product.image}`,
+    description: product.description || `${product.name} available for fast campus delivery at Shipz Mart.`,
+    sku: product.id,
+    brand: {
+      "@type": "Brand",
+      name: "Shipz Mart",
+    },
+    offers: {
+      "@type": "Offer",
+      url: `https://www.shipz.store/product/${product.slug || product.id}`,
+      priceCurrency: "INR",
+      price: product.price,
+      availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      seller: {
+        "@type": "Organization",
+        name: "Shipz Mart",
+      },
+    },
+    ...(reviewCount > 0 && reviewRating
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: reviewRating,
+            reviewCount: reviewCount,
+          },
+        }
+      : {}),
+  };
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: "https://www.shipz.store/",
+      },
+      ...(categoryObj
+        ? [
+            {
+              "@type": "ListItem",
+              position: 2,
+              name: categoryObj.name,
+              item: `https://www.shipz.store/?category=${categoryObj.id}`,
+            },
+            {
+              "@type": "ListItem",
+              position: 3,
+              name: product.name,
+              item: `https://www.shipz.store/product/${product.slug || product.id}`,
+            },
+          ]
+        : [
+            {
+              "@type": "ListItem",
+              position: 2,
+              name: product.name,
+              item: `https://www.shipz.store/product/${product.slug || product.id}`,
+            },
+          ]),
+    ],
+  };
+
   return (
     <div className="container-page py-4 md:py-8">
+      {/* Search Engine Optimization: Structured Data JSON-LD */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
+
       {/* Top Breadcrumb & Navigation Bar */}
       <nav aria-label="Breadcrumbs" className="mb-6 flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-2">
@@ -231,6 +313,11 @@ function ProductDetailPage() {
               <img
                 src={imageError ? BRAND_FALLBACK_IMAGE : product.image}
                 alt={product.name}
+                width={800}
+                height={800}
+                fetchPriority="high"
+                loading="eager"
+                decoding="sync"
                 className={cn(
                   "h-full w-full object-cover transition duration-500 hover:scale-105",
                   outOfStock && "opacity-50 grayscale"

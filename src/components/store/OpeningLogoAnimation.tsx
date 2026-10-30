@@ -1,71 +1,32 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { ShoppingBag } from "lucide-react";
 import { useBranding } from "@/lib/branding";
+import { useStore } from "@/lib/store";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/data/products";
 
 export const INTRO_SESSION_STORAGE_KEY = "shipt_opening_intro_shown";
 
 /**
- * OpeningLogoAnimation
- *
- * Professional full-screen opening brand intro for the Shipt storefront.
- *
- * Design & Polish:
- * - Full-screen warm cream canvas with soft ambient glow.
- * - Forest green Shipt shopping-bag logo with a smooth pop-in and subtle scale.
- * - Staggered reveal of "Shipt" typography and the official tagline.
- * - Smooth 450ms fade-out transition after ~1.8 seconds.
- *
- * Safety & UX:
- * - Plays strictly ONCE per browser session/tab (stored in sessionStorage).
- * - Restriced to storefront homepage ("/") only.
- * - Never interrupts /checkout, /admin, /account, /accept-invitation, or auth token callbacks.
- * - Respects prefers-reduced-motion accessibility settings.
- * - Click or press Escape to skip immediately.
- * - Non-blocking: unmounts completely from the DOM after completion.
+ * Checks whether the opening intro overlay should be visible immediately on client mount.
+ * Prevents double-loading flash and excludes non-storefront routes.
  */
-export function OpeningLogoAnimation() {
-  const { branding } = useBranding();
-  const [isVisible, setIsVisible] = useState(false);
-  const [isFadingOut, setIsFadingOut] = useState(false);
+function shouldShowInitially(): boolean {
+  if (typeof window === "undefined") return false;
 
-  const dismissIntro = useCallback(() => {
-    setIsFadingOut(true);
-    if (typeof window !== "undefined") {
-      try {
-        sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
-      } catch {
-        // Safe fallback if sessionStorage is blocked
-      }
-    }
-    const timer = setTimeout(() => {
-      setIsVisible(false);
-    }, 450);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
+  try {
     // 1. Check if already shown in this tab session
-    try {
-      const alreadyShown = sessionStorage.getItem(INTRO_SESSION_STORAGE_KEY);
-      if (alreadyShown === "true") {
-        return;
-      }
-    } catch {
-      return;
+    const alreadyShown = sessionStorage.getItem(INTRO_SESSION_STORAGE_KEY);
+    if (alreadyShown === "true") {
+      return false;
     }
 
     // 2. Accessibility: Respect reduced motion preferences
-    try {
-      const prefersReducedMotion =
-        window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (prefersReducedMotion) {
-        sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
-        return;
-      }
-    } catch {}
+    const prefersReducedMotion =
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion) {
+      sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
+      return false;
+    }
 
     // 3. Route Guard: NEVER interrupt checkout, admin, auth, invitation, or recovery routes
     const pathname = window.location.pathname || "/";
@@ -89,34 +50,84 @@ export function OpeningLogoAnimation() {
       search.includes("code=") ||
       search.includes("error=");
 
-    // The intro animation should only play when entering the storefront homepage
     const isStorefrontHome = pathname === "/" || pathname === "";
 
     if (!isStorefrontHome || isExcludedRoute || hasAuthParams) {
-      // Mark as seen so navigation within the session remains seamless
+      sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * OpeningLogoAnimation
+ *
+ * Professional full-screen opening brand intro for the Shipt storefront.
+ *
+ * Design & Polish:
+ * - Full-screen warm cream canvas with soft ambient glow.
+ * - Forest green Shipt shopping-bag logo with a smooth pop-in and subtle scale.
+ * - Staggered reveal of "Shipt" typography and the official tagline.
+ * - Smooth 450ms fade-out transition.
+ *
+ * Safety & UX:
+ * - Plays strictly ONCE per browser session/tab (stored in sessionStorage).
+ * - Restricted to storefront homepage ("/") only.
+ * - Coordinated with store catalog readiness so the store is completely loaded
+ *   and ready underneath before the splash screen dismisses.
+ * - Minimum legible brand display of 600ms, maximum safety timeout of 1.75s so
+ *   slow connections never leave the user hanging.
+ * - Never interrupts /checkout, /admin, /account, /accept-invitation, or auth token callbacks.
+ * - Respects prefers-reduced-motion accessibility settings.
+ * - Click or press Escape to skip immediately.
+ * - Non-blocking: unmounts completely from the DOM after completion.
+ */
+export function OpeningLogoAnimation() {
+  const { branding } = useBranding();
+  const { isCatalogReady } = useStore();
+  const [isVisible, setIsVisible] = useState(() => shouldShowInitially());
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const startTimeRef = useRef(Date.now());
+  const hasTriggeredDismissRef = useRef(false);
+
+  const dismissIntro = useCallback(() => {
+    if (hasTriggeredDismissRef.current) return;
+    hasTriggeredDismissRef.current = true;
+    setIsFadingOut(true);
+    if (typeof window !== "undefined") {
       try {
         sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
-      } catch {}
+      } catch {
+        // Safe fallback if sessionStorage is blocked
+      }
+    }
+    const timer = setTimeout(() => {
+      setIsVisible(false);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Verify should show in case location/session changed after component instance creation
+    if (!shouldShowInitially()) {
+      setIsVisible(false);
       return;
     }
 
-    // 4. Activate intro overlay
     setIsVisible(true);
 
-    // 5. Automatically initiate smooth fade-out after ~1.75s
-    const fadeTimer = setTimeout(() => {
-      setIsFadingOut(true);
-      try {
-        sessionStorage.setItem(INTRO_SESSION_STORAGE_KEY, "true");
-      } catch {}
+    // 1. Fallback maximum timeout: Always initiate fade-out after ~1.75s even on slow networks
+    const fallbackTimer = setTimeout(() => {
+      dismissIntro();
     }, 1750);
 
-    // 6. Complete removal from DOM at 2.2s (after 450ms fade transition)
-    const endTimer = setTimeout(() => {
-      setIsVisible(false);
-    }, 2200);
-
-    // 7. Keydown listener for instant skip via Escape key
+    // 2. Keydown listener for instant skip via Escape key
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         dismissIntro();
@@ -125,11 +136,29 @@ export function OpeningLogoAnimation() {
     window.addEventListener("keydown", handleKeyDown);
 
     return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(endTimer);
+      clearTimeout(fallbackTimer);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [dismissIntro]);
+
+  // Once the store catalog is ready in the background, smoothly transition out
+  // after ensuring a crisp minimum branding display time (600ms)
+  useEffect(() => {
+    if (!isVisible || !isCatalogReady || hasTriggeredDismissRef.current) return;
+
+    const elapsed = Date.now() - startTimeRef.current;
+    const minDisplayTime = 600;
+
+    if (elapsed >= minDisplayTime) {
+      dismissIntro();
+      return undefined;
+    } else {
+      const waitTimer = setTimeout(() => {
+        dismissIntro();
+      }, minDisplayTime - elapsed);
+      return () => clearTimeout(waitTimer);
+    }
+  }, [isVisible, isCatalogReady, dismissIntro]);
 
   if (!isVisible) {
     return null;

@@ -1,0 +1,19 @@
+# Shipz Mart (https://www.shipz.store) Robots Configuration
+User-agent: *
+Allow: /
+Allow: /cart
+Allow: /wishlist
+Allow: /contact
+Allow: /suggest-product
+Allow: /product/
+
+# Disallow administrative, checkout, and authenticated state URLs
+Disallow: /admin
+Disallow: /admin/
+Disallow: /checkout
+Disallow: /accept-invitation
+Disallow: /auth.callback
+
+# Sitemap location
+Sitemap: https://www.shipz.store/sitemap.xml
+

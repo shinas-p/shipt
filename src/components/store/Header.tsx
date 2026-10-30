@@ -9,6 +9,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { BRAND_NAME, BRAND_TAGLINE, categories } from "@/data/products";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OrderTrackerModal } from "./OrderTrackerModal";
+import { CustomerNotificationBell } from "./CustomerNotificationBell";
 
 export function Logo() {
   const { branding } = useBranding();
@@ -18,6 +19,8 @@ export function Logo() {
         <img
           src={branding.logo_url}
           alt={branding.store_name}
+          width={36}
+          height={36}
           className="size-9 object-contain rounded-xl"
         />
       ) : (
@@ -98,6 +101,7 @@ export function Header() {
             type="button"
             onClick={() => toast("Fast doorstep delivery is available at checkout!")}
             className="ml-4 hidden items-center gap-2 rounded-full px-3 py-1.5 text-left hover:bg-secondary lg:flex"
+            aria-label="Delivery location: Doorstep delivery available across campus"
           >
             <MapPin className="size-4 text-primary" />
             <span className="leading-tight">
@@ -132,6 +136,13 @@ export function Header() {
               )}
             </Link>
 
+            {user && (
+              <CustomerNotificationBell
+                userId={user.id}
+                onSelectOrder={() => navigate({ to: "/account", search: { tab: "orders" } })}
+              />
+            )}
+
             <Link
               to="/account"
               className="grid size-10 place-items-center rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground transition"
@@ -142,7 +153,9 @@ export function Header() {
                 profile?.avatar_url ? (
                   <img
                     src={profile.avatar_url}
-                    alt={profile.full_name || "Account"}
+                    alt={profile.full_name || "Account avatar"}
+                    width={28}
+                    height={28}
                     className="size-7 rounded-full object-cover ring-1 ring-primary/30"
                   />
                 ) : (
@@ -177,8 +190,8 @@ export function Header() {
           <button
             type="button"
             onClick={handleOrdersClick}
-            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-xs font-semibold shadow-2xs"
-            aria-label="Orders"
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-xs font-semibold shadow-2xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={user ? "My Orders" : "Track Orders"}
             title={user ? "My Orders" : "Orders"}
           >
             <Package className="size-4 text-primary" />
@@ -199,6 +212,13 @@ export function Header() {
           </div>
 
           <div className="mt-4 border-b border-border pb-3 space-y-2">
+            {user && (
+              <CustomerNotificationBell
+                userId={user.id}
+                onSelectOrder={() => navigate({ to: "/account", search: { tab: "orders" } })}
+              />
+            )}
+
             <Link
               to="/account"
               onClick={() => setMenu(false)}

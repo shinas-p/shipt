@@ -2,12 +2,18 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured, validateSupabaseConfig } from "@/lib/supabase";
 import { getSafeRedirectUrl, getOAuthCallbackUrl } from "@/lib/auth-helpers";
+import type { StudentPaymentPolicy } from "@/lib/types";
 import { toast } from "sonner";
 
 export interface CustomerProfile {
   id: string;
   full_name: string | null;
   phone: string | null;
+  student_id?: string | null;
+  payment_policy?: StudentPaymentPolicy | null;
+  verified_no_show_count?: number;
+  cash_restricted?: boolean;
+  cash_restriction_reason?: string | null;
   default_hostel: string | null;
   default_block: string | null;
   default_room: string | null;
@@ -95,11 +101,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = useCallback(async (userId: string, authUser?: User | null) => {
     if (!isSupabaseConfigured) return;
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+        .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url, payment_policy, verified_no_show_count, cash_restricted, cash_restriction_reason, student_id")
         .eq("id", userId)
         .maybeSingle();
+
+      if (error && (error.code === "42703" || error.message?.includes("does not exist"))) {
+        const fallback = await supabase
+          .from("profiles")
+          .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+          .eq("id", userId)
+          .maybeSingle();
+        if (fallback.data) {
+          data = {
+            ...fallback.data,
+            payment_policy: "default",
+            verified_no_show_count: 0,
+            cash_restricted: false,
+            cash_restriction_reason: null,
+            student_id: null,
+          };
+        } else {
+          data = null;
+        }
+        error = fallback.error;
+      }
 
       // Extract OAuth metadata safely if available
       const meta = (authUser?.user_metadata || {}) as Record<string, any>;
@@ -126,7 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .from("profiles")
             .update(updates)
             .eq("id", userId)
-            .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+            .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url, payment_policy, verified_no_show_count, cash_restricted, cash_restriction_reason, student_id")
             .maybeSingle();
           setProfile((updated || { ...data, ...updates }) as CustomerProfile);
         } else {
@@ -143,7 +170,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const { data: newProf } = await supabase
           .from("profiles")
           .upsert(initialPayload, { onConflict: "id" })
-          .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url")
+          .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url, payment_policy, verified_no_show_count, cash_restricted, cash_restriction_reason, student_id")
           .maybeSingle();
         if (newProf) {
           setProfile(newProf as CustomerProfile);

@@ -26,6 +26,9 @@ export function ProductDetailsModal() {
             <img
               src={p.image}
               alt={p.name}
+              width={600}
+              height={600}
+              loading="eager"
               className={cn("h-full w-full object-cover transition duration-500", out && "grayscale opacity-60")}
               onError={(e) => {
                 e.currentTarget.src = BRAND_FALLBACK_IMAGE;

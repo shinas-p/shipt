@@ -13,6 +13,11 @@ import {
   ExternalLink,
   Clock,
   Sparkles,
+  CreditCard,
+  CheckCircle2,
+  RotateCcw,
+  Truck,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -111,6 +116,54 @@ export function AdminNotificationBell({ onSelectOrder, onOpenPushSettings }: Adm
           icon: AlertCircle,
           label: "Payment Attention",
           className: "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-400",
+        };
+      case "payment_initiated":
+        return {
+          icon: CreditCard,
+          label: "Payment Started",
+          className: "bg-indigo-500/15 text-indigo-700 border-indigo-500/30 dark:text-indigo-400",
+        };
+      case "payment_success":
+        return {
+          icon: CheckCircle2,
+          label: "PayU Paid",
+          className: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-400",
+        };
+      case "payment_failed":
+        return {
+          icon: XCircle,
+          label: "Payment Failed",
+          className: "bg-rose-500/15 text-rose-700 border-rose-500/30 dark:text-rose-400",
+        };
+      case "payment_pending_timeout":
+        return {
+          icon: Clock,
+          label: "Payment Expired",
+          className: "bg-amber-500/15 text-amber-700 border-amber-500/30 dark:text-amber-400",
+        };
+      case "payment_suspicious_callback":
+        return {
+          icon: AlertTriangle,
+          label: "Tamper Alert",
+          className: "bg-destructive/20 text-destructive border-destructive/40 font-bold",
+        };
+      case "refund_requested":
+        return {
+          icon: RotateCcw,
+          label: "Refund Request",
+          className: "bg-orange-500/15 text-orange-700 border-orange-500/30 dark:text-orange-400",
+        };
+      case "refund_status_changed":
+        return {
+          icon: RefreshCw,
+          label: "Refund Update",
+          className: "bg-purple-500/15 text-purple-700 border-purple-500/30 dark:text-purple-400",
+        };
+      case "order_status_changed":
+        return {
+          icon: Truck,
+          label: "Order Update",
+          className: "bg-blue-500/15 text-blue-700 border-blue-500/30 dark:text-blue-400",
         };
       case "new_suggestion":
         return {
