@@ -25,9 +25,11 @@ import { loadStorePaymentSettings, DEFAULT_STORE_PAYMENT_SETTINGS } from "@/lib/
 import {
   preparePayUCheckout,
   submitPayUHostedForm,
-  verifyPayUPaymentServerSide,
   handlePayUFailureServerSide,
+  verifyPayUTransactionViaServerAPI,
 } from "@/lib/payuApi";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const PICKUP_LOCATIONS = [
@@ -209,6 +211,13 @@ export function CheckoutForm() {
   });
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedOrderNo, setCopiedOrderNo] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [verificationPending, setVerificationPending] = useState<{
+    orderId: string;
+    orderNumber?: string | undefined;
+    txnid?: string | undefined;
+  } | null>(null);
+  const [isRetryingVerification, setIsRetryingVerification] = useState(false);
 
   const set = <K extends keyof CheckoutFormData>(k: K, v: CheckoutFormData[K]) => {
     setF((p) => ({ ...p, [k]: v }));
@@ -246,36 +255,104 @@ export function CheckoutForm() {
     const payuStatus = params.get("payu_status");
     const txnid = params.get("txnid");
     const orderId = params.get("order_id");
+    const orderNum = params.get("order_number");
 
-    if (payuStatus && txnid) {
-      if (payuStatus === "success") {
-        verifyPayUPaymentServerSide({
-          orderId,
-          txnid,
-          mihpayid: params.get("mihpayid") || txnid,
-          amount: parseFloat(params.get("amount") || "0"),
-          status: "success",
-          mode: params.get("mode") || "online",
-        }).then((res) => {
-          if (res.success && res.data) {
-            setDone(res.data);
-            try {
-              sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(res.data));
-            } catch { }
-            clear();
+    if (payuStatus) {
+      if (payuStatus === "success" && (orderId || txnid)) {
+        setIsVerifyingPayment(true);
+        setSubmitError(null);
+
+        const checkAndConfirmOrder = async () => {
+          try {
+            // 1. Direct check in database: Has server-side callback/webhook already marked it paid?
+            if (isSupabaseConfigured && orderId) {
+              const { data: dbOrder } = await supabase
+                .from("orders")
+                .select("id, order_number, total_amount, subtotal, delivery_fee, discount_amount, status, payment_status, guest_tracking_token, customer_name, customer_phone, delivery_method, delivery_block_id, hostel, block, room, pickup_location, delivery_instructions, payment_method, created_at")
+                .eq("id", orderId)
+                .maybeSingle();
+
+              if (dbOrder && (dbOrder.payment_status === "paid" || dbOrder.status === "placed")) {
+                const confirmedResult: PlacedOrderResult = {
+                  order_id: dbOrder.id,
+                  order_number: dbOrder.order_number,
+                  total_amount: Number(dbOrder.total_amount),
+                  status: dbOrder.status,
+                  payment_method: dbOrder.payment_method || "payu",
+                  payment_status: dbOrder.payment_status || "paid",
+                  guest_tracking_token: dbOrder.guest_tracking_token || null,
+                  delivery_block_id: dbOrder.delivery_block_id || null,
+                };
+                setDone(confirmedResult);
+                try {
+                  sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(confirmedResult));
+                } catch { }
+                clear();
+                setIsVerifyingPayment(false);
+                const cleanUrl = window.location.pathname;
+                window.history.replaceState({}, document.title, cleanUrl);
+                return;
+              }
+            }
+
+            // 2. If not yet confirmed in DB, verify through Server Verify Payment API
+            const serverVerifyRes = await verifyPayUTransactionViaServerAPI({
+              orderId: orderId ?? undefined,
+              txnid: txnid ?? undefined,
+            });
+
+            if (serverVerifyRes.success && serverVerifyRes.verified) {
+              const confirmedResult: PlacedOrderResult = {
+                order_id: serverVerifyRes.data?.order_id || orderId || "",
+                order_number: serverVerifyRes.data?.order_number || orderNum || "QM-ORDER",
+                total_amount: Number(serverVerifyRes.data?.total_amount || 0),
+                status: "placed",
+                payment_method: "payu",
+                payment_status: "paid",
+                guest_tracking_token: serverVerifyRes.data?.guest_tracking_token || null,
+                delivery_block_id: f.deliveryBlockId || null,
+              };
+              setDone(confirmedResult);
+              try {
+                sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(confirmedResult));
+              } catch { }
+              clear();
+              setIsVerifyingPayment(false);
+              const cleanUrl = window.location.pathname;
+              window.history.replaceState({}, document.title, cleanUrl);
+              return;
+            }
+
+            // 3. Payment is not yet confirmed by gateway — show pending verification screen with manual retry
+            // Never confirm order using client-supplied parameters
+            setVerificationPending({
+              orderId: orderId || "",
+              orderNumber: orderNum ?? undefined,
+              txnid: txnid ?? undefined,
+            });
+          } catch {
+            setVerificationPending({
+              orderId: orderId || "",
+              orderNumber: orderNum ?? undefined,
+              txnid: txnid ?? undefined,
+            });
+          } finally {
+            setIsVerifyingPayment(false);
           }
-        });
+        };
+
+        checkAndConfirmOrder();
       } else if (payuStatus === "failed") {
         setSubmitError("Your PayU payment was cancelled or declined. You can adjust your details and retry checkout.");
         handlePayUFailureServerSide({
           orderId,
-          txnid,
+          txnid: txnid || "",
           errorCode: params.get("error") || "CANCELLED",
           errorMsg: params.get("error_Message") || "Payment cancelled or declined",
         });
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
       }
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
     }
   }, []);
 
@@ -411,6 +488,81 @@ export function CheckoutForm() {
 
           <Button asChild variant="outline" className="h-11 px-6 text-xs">
             <Link to="/">Browse Catalogue</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isVerifyingPayment) {
+    return (
+      <div className="mx-auto mt-8 max-w-lg rounded-3xl border border-border bg-card p-10 text-center shadow-soft">
+        <Loader2 className="mx-auto size-12 animate-spin text-primary" />
+        <h2 className="mt-4 font-display text-xl font-bold text-foreground">Verifying Your Payment...</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Confirming your transaction with PayU. Please do not close, refresh, or leave this page.
+        </p>
+      </div>
+    );
+  }
+
+  if (verificationPending) {
+    return (
+      <div className="mx-auto mt-8 max-w-lg rounded-3xl border border-amber-500/30 bg-amber-500/10 p-8 text-center shadow-soft">
+        <div className="mx-auto grid size-12 place-items-center rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400">
+          <Loader2 className={cn("size-6", isRetryingVerification && "animate-spin")} />
+        </div>
+        <h2 className="mt-4 font-display text-xl font-bold text-foreground">
+          Payment Verification in Progress
+        </h2>
+        {verificationPending.orderNumber && (
+          <p className="mt-1 font-mono text-sm font-semibold text-foreground">
+            Order Reference: {verificationPending.orderNumber}
+          </p>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground sm:text-sm">
+          We have recorded your order and are awaiting final settlement confirmation from your bank/UPI gateway. You will not be charged again.
+        </p>
+
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+          <Button
+            type="button"
+            variant="hero"
+            disabled={isRetryingVerification}
+            onClick={async () => {
+              setIsRetryingVerification(true);
+              try {
+                const res = await verifyPayUTransactionViaServerAPI({
+                  orderId: verificationPending.orderId,
+                  txnid: verificationPending.txnid ?? undefined,
+                });
+                if (res.success && res.verified) {
+                  setDone(res.data);
+                  setVerificationPending(null);
+                  clear();
+                } else {
+                  toast.info(res.error || "Payment is still being processed by the bank. Please try again in a few moments.");
+                }
+              } catch {
+                toast.error("Could not check payment status at this moment.");
+              } finally {
+                setIsRetryingVerification(false);
+              }
+            }}
+            className="w-full sm:w-auto"
+          >
+            {isRetryingVerification ? (
+              <>
+                <Loader2 className="size-4 animate-spin mr-2" />
+                Checking Gateway...
+              </>
+            ) : (
+              "Check Status Now"
+            )}
+          </Button>
+
+          <Button asChild variant="outline" className="w-full sm:w-auto">
+            <Link to="/">Continue to Home</Link>
           </Button>
         </div>
       </div>

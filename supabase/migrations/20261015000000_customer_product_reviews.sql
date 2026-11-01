@@ -83,7 +83,7 @@ AS $$
     JOIN public.order_items oi ON oi.order_id = o.id
     WHERE o.user_id = p_user_id
       AND o.status IN ('confirmed', 'preparing', 'out_for_delivery', 'delivered', 'completed')
-      AND (oi.product_id = p_product_id OR oi.product_name ILIKE '%' || p_product_id || '%')
+      AND (oi.product_id::text = p_product_id OR oi.product_name ILIKE '%' || p_product_id || '%')
   );
 $$;
 

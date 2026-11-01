@@ -173,8 +173,8 @@ export async function preparePayUCheckout(
 
   const txnid = generatePayUTxnId(params.order_number);
   const formattedAmount = params.amount.toFixed(2);
-  const surl = callbackUrls?.surl || `${origin}/checkout?payu_status=success&txnid=${txnid}&order_id=${params.order_id}`;
-  const furl = callbackUrls?.furl || `${origin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${params.order_id}`;
+  const surl = callbackUrls?.surl || `${origin}/checkout?payu_status=success&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}`;
+  const furl = callbackUrls?.furl || `${origin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}`;
 
   const cleanFirstName = params.customer_name.trim().split(" ")[0]?.replace(/[^a-zA-Z0-9]/g, "") || "Customer";
   const cleanEmail = (params.customer_email.trim() || "guest@campus.edu").toLowerCase();
@@ -295,12 +295,27 @@ export async function verifyPayUPaymentServerSide(params: {
   }
 
   try {
+    // Strict amount validation: Never substitute database order amount or zero as paid amount
+    if (!params.amount || params.amount <= 0) {
+      return {
+        success: false,
+        error: "Payment verification rejected: valid gateway-confirmed amount (> 0) is required.",
+      };
+    }
+
+    if (params.status?.toLowerCase() !== "success") {
+      return {
+        success: false,
+        error: `Payment verification rejected: gateway reported status '${params.status}' (expected 'success').`,
+      };
+    }
+
     const { data, error } = await supabase.rpc("verify_payu_payment_transaction", {
       p_order_id: params.orderId || null,
       p_txnid: params.txnid,
       p_mihpayid: params.mihpayid,
       p_amount: params.amount,
-      p_status: params.status,
+      p_status: "success",
       p_mode: params.mode || "online",
       p_response_payload: params.responsePayload || {},
       p_verified_via: params.verifiedVia || "callback",
@@ -317,6 +332,76 @@ export async function verifyPayUPaymentServerSide(params: {
 }
 
 /**
+ * On-demand server-side transaction verification using official PayU Verify Payment API
+ * Invokes the payu-webhook Edge Function with private merchant salt
+ */
+export async function verifyPayUTransactionViaServerAPI(params: {
+  orderId?: string | null | undefined;
+  txnid?: string | undefined;
+  guestToken?: string | undefined;
+}): Promise<{
+  success: boolean;
+  verified?: boolean;
+  already_verified?: boolean;
+  status?: string;
+  data?: any;
+  error?: string;
+}> {
+  if (!isSupabaseConfigured) {
+    return {
+      success: true,
+      verified: true,
+      status: "success",
+      data: {
+        status: "placed",
+        payment_status: "paid",
+        order_id: params.orderId || "order-mock",
+        txnid: params.txnid || "TXN_MOCK",
+      },
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke("payu-webhook", {
+      body: {
+        action: "verify_payment",
+        order_id: params.orderId,
+        txnid: params.txnid,
+        guest_token: params.guestToken,
+      },
+    });
+
+    if (error) {
+      return { success: false, verified: false, error: error.message };
+    }
+
+    if (data?.success && data?.verified) {
+      return {
+        success: true,
+        verified: true,
+        already_verified: !!data.already_verified,
+        status: "success",
+        data: data.data,
+      };
+    }
+
+    return {
+      success: false,
+      verified: false,
+      status: data?.status || "pending",
+      error: data?.error || "Payment verification pending",
+      data: data?.data,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      verified: false,
+      error: err?.message || "Failed to contact payment verification service.",
+    };
+  }
+}
+
+/**
  * Handles failed or cancelled PayU payment
  */
 export async function handlePayUFailureServerSide(params: {
@@ -325,6 +410,7 @@ export async function handlePayUFailureServerSide(params: {
   errorCode?: string;
   errorMsg?: string;
   responsePayload?: Record<string, any>;
+  guestToken?: string;
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   if (!isSupabaseConfigured) {
     return {
@@ -338,6 +424,26 @@ export async function handlePayUFailureServerSide(params: {
   }
 
   try {
+    // First attempt failure processing via Edge Function (handles service-role authorization)
+    try {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke("payu-webhook", {
+        body: {
+          action: "handle_failure",
+          order_id: params.orderId,
+          txnid: params.txnid,
+          error_code: params.errorCode || "FAILED",
+          error_msg: params.errorMsg || "Payment cancelled or declined",
+          guest_token: params.guestToken,
+        },
+      });
+
+      if (!fnError && fnData?.success) {
+        return { success: true, data: fnData.data };
+      }
+    } catch {
+      // Fallback to direct RPC below
+    }
+
     const { data, error } = await supabase.rpc("handle_failed_payu_payment", {
       p_order_id: params.orderId || null,
       p_txnid: params.txnid,
