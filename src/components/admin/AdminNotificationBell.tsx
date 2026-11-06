@@ -126,7 +126,7 @@ export function AdminNotificationBell({ onSelectOrder, onOpenPushSettings }: Adm
       case "payment_success":
         return {
           icon: CheckCircle2,
-          label: "PayU Paid",
+          label: "Payment Received",
           className: "bg-emerald-500/15 text-emerald-700 border-emerald-500/30 dark:text-emerald-400",
         };
       case "payment_failed":

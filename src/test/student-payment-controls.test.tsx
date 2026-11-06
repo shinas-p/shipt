@@ -249,12 +249,12 @@ describe("Feature 1: Student Payment Policies & Trust Controls", () => {
       });
 
       expect(res.success).toBe(true);
-      expect(mockRpc).toHaveBeenCalledWith("admin_update_store_payment_settings", {
+      expect(mockRpc).toHaveBeenCalledWith("admin_update_store_payment_settings", expect.objectContaining({
         p_cash_enabled: false,
         p_online_enabled: true,
         p_guest_cash_allowed: false,
         p_threshold: 3,
-      });
+      }));
     });
   });
 

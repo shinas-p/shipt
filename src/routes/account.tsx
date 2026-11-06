@@ -84,8 +84,11 @@ function getStatusBadge(status: string) {
       return <Badge className="bg-purple-600/15 text-purple-700 hover:bg-purple-600/25 border-purple-600/20">Preparing</Badge>;
     case "confirmed":
       return <Badge className="bg-blue-600/15 text-blue-700 hover:bg-blue-600/25 border-blue-600/20">Confirmed</Badge>;
+    case "awaiting_approval":
+      return <Badge variant="outline" className="text-blue-700 border-blue-600/40 bg-blue-500/10">Awaiting Approval</Badge>;
+    case "awaiting_payment":
     case "pending_payment":
-      return <Badge variant="outline" className="text-amber-700 border-amber-600/40 bg-amber-500/10">Pending Payment</Badge>;
+      return <Badge variant="outline" className="text-amber-700 border-amber-600/40 bg-amber-500/10">Awaiting Payment</Badge>;
     case "cancelled":
       return <Badge variant="destructive">Cancelled</Badge>;
     default:
@@ -103,6 +106,12 @@ function getPaymentStatusBadge(paymentStatus?: string, paymentMethod?: string) {
           Paid
         </Badge>
       );
+    case "verification_pending":
+      return (
+        <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 border-amber-500/30 text-[10px]">
+          Verification Pending
+        </Badge>
+      );
     case "failed":
       return <Badge variant="destructive" className="text-[10px]">Payment Failed</Badge>;
     case "expired":
@@ -117,7 +126,7 @@ function getPaymentStatusBadge(paymentStatus?: string, paymentMethod?: string) {
     default:
       return (
         <Badge variant="outline" className="text-amber-700 border-amber-600/30 bg-amber-500/10 text-[10px]">
-          {paymentMethod === "cash" ? "Cash on Delivery" : "Payment Pending"}
+          {paymentMethod === "cod" || paymentMethod === "cash" ? "Cash on Delivery" : "Payment Pending"}
         </Badge>
       );
   }
@@ -125,7 +134,14 @@ function getPaymentStatusBadge(paymentStatus?: string, paymentMethod?: string) {
 
 function isOrderEligibleForCustomerCancellation(status: string): boolean {
   const s = status.toLowerCase();
-  return s === "placed" || s === "confirmed" || s === "preparing";
+  return (
+    s === "awaiting_payment" ||
+    s === "pending_payment" ||
+    s === "awaiting_approval" ||
+    s === "placed" ||
+    s === "confirmed" ||
+    s === "preparing"
+  );
 }
 
 function AccountPage() {
@@ -1607,7 +1623,7 @@ function AccountPage() {
               <div>
                 <h2 className="font-display text-lg font-bold text-foreground">Order Alerts & Updates</h2>
                 <p className="text-xs text-muted-foreground">
-                  Stay updated on your PayU payment confirmations, campus prep, and delivery milestones.
+                  Stay updated on your payment confirmations, campus prep, and delivery milestones.
                 </p>
               </div>
 

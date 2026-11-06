@@ -35,7 +35,9 @@ export interface CartItem {
 export type PaymentMethod = "upi" | "cod" | "payu";
 
 export type OrderStatus =
+  | "awaiting_payment"
   | "pending_payment"
+  | "awaiting_approval"
   | "placed"
   | "confirmed"
   | "preparing"
@@ -46,6 +48,7 @@ export type OrderStatus =
 
 export type PaymentStatus =
   | "pending"
+  | "verification_pending"
   | "processing"
   | "paid"
   | "completed"
@@ -93,6 +96,7 @@ export interface PayUInitiateParams {
   customer_name: string;
   customer_email: string;
   customer_phone: string;
+  guest_token?: string | undefined;
   surl?: string;
   furl?: string;
   udf1?: string;
@@ -156,8 +160,23 @@ export interface StudentProfile {
   default_block?: string | null;
   default_room?: string | null;
   avatar_url?: string | null;
+  cancellation_count?: number;
+  is_blocked?: boolean;
+  blocked_reason?: string | null;
+  blocked_at?: string | null;
+  blocked_by?: string | null;
   created_at: string;
   updated_at?: string;
+}
+
+export interface CustomerRestrictionAuditLog {
+  id: string;
+  customer_id: string;
+  action: "blocked" | "unblocked" | "cash_restricted" | "cash_restored" | "policy_override";
+  reason: string;
+  changed_by: string;
+  metadata?: Record<string, any>;
+  created_at: string;
 }
 
 export interface StudentPaymentAuditLog {
@@ -193,9 +212,23 @@ export interface StorePaymentSettings {
   online_payment_enabled: boolean;
   guest_cash_allowed: boolean;
   max_cash_no_shows_threshold: number;
+  upi_id?: string;
+  upi_payee_name?: string;
+  upi_qr_code_url?: string | null;
+  max_active_cod_orders?: number;
+  max_cod_order_amount?: number;
+  require_first_order_approval?: boolean;
+  duplicate_order_window_seconds?: number;
 }
 
-export type AdminOrderStatusTab = "all" | "pending" | "processing" | "completed" | "cancelled";
+export type AdminOrderStatusTab =
+  | "all"
+  | "verification_pending"
+  | "awaiting_approval"
+  | "pending"
+  | "processing"
+  | "completed"
+  | "cancelled";
 
 export interface CheckoutFormData {
   name: string;
@@ -207,7 +240,7 @@ export interface CheckoutFormData {
   room?: string;
   pickupLocation?: string;
   instructions?: string;
-  payment: PaymentMethod;
+  payment: "upi" | "cod";
 }
 
 export interface PlacedOrderResult {
@@ -288,6 +321,24 @@ export interface AdminOrderStatusHistory {
   created_at: string;
 }
 
+export interface AdminPaymentRecord {
+  id: string;
+  order_id: string;
+  payment_method: string;
+  amount: number;
+  status: string;
+  upi_reference_number?: string | null;
+  screenshot_path?: string | null;
+  screenshot_uploaded_at?: string | null;
+  verification_notes?: string | null;
+  rejection_reason?: string | null;
+  verified_by?: string | null;
+  verified_at?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AdminOrder {
   id: string;
   order_number: string;
@@ -308,6 +359,8 @@ export interface AdminOrder {
   total_amount: number;
   payment_method: string;
   payment_status: string;
+  is_first_order?: boolean;
+  approval_notes?: string | null;
   payu_txnid?: string | null;
   payu_mihpayid?: string | null;
   payment_expires_at?: string | null;
@@ -320,4 +373,5 @@ export interface AdminOrder {
   updated_at?: string;
   order_items?: AdminOrderItem[];
   order_status_history?: AdminOrderStatusHistory[];
+  payments?: AdminPaymentRecord[];
 }

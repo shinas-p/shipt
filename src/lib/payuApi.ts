@@ -159,6 +159,7 @@ export async function preparePayUCheckout(
           customer_phone: params.customer_phone,
           product_info: params.product_info,
           origin,
+          guest_token: params.guest_token,
         },
       });
 
@@ -173,8 +174,9 @@ export async function preparePayUCheckout(
 
   const txnid = generatePayUTxnId(params.order_number);
   const formattedAmount = params.amount.toFixed(2);
-  const surl = callbackUrls?.surl || `${origin}/checkout?payu_status=success&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}`;
-  const furl = callbackUrls?.furl || `${origin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}`;
+  const guestParam = params.guest_token ? `&guest_token=${encodeURIComponent(params.guest_token)}` : "";
+  const surl = callbackUrls?.surl || `${origin}/checkout?payu_status=success&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}${guestParam}`;
+  const furl = callbackUrls?.furl || `${origin}/checkout?payu_status=failed&txnid=${txnid}&order_id=${params.order_id}&amount=${formattedAmount}${guestParam}`;
 
   const cleanFirstName = params.customer_name.trim().split(" ")[0]?.replace(/[^a-zA-Z0-9]/g, "") || "Customer";
   const cleanEmail = (params.customer_email.trim() || "guest@campus.edu").toLowerCase();
@@ -339,6 +341,7 @@ export async function verifyPayUTransactionViaServerAPI(params: {
   orderId?: string | null | undefined;
   txnid?: string | undefined;
   guestToken?: string | undefined;
+  guest_token?: string | undefined;
 }): Promise<{
   success: boolean;
   verified?: boolean;
@@ -367,7 +370,7 @@ export async function verifyPayUTransactionViaServerAPI(params: {
         action: "verify_payment",
         order_id: params.orderId,
         txnid: params.txnid,
-        guest_token: params.guestToken,
+        guest_token: params.guestToken || params.guest_token,
       },
     });
 
@@ -405,12 +408,13 @@ export async function verifyPayUTransactionViaServerAPI(params: {
  * Handles failed or cancelled PayU payment
  */
 export async function handlePayUFailureServerSide(params: {
-  orderId?: string | null;
+  orderId?: string | null | undefined;
   txnid: string;
-  errorCode?: string;
-  errorMsg?: string;
-  responsePayload?: Record<string, any>;
-  guestToken?: string;
+  errorCode?: string | undefined;
+  errorMsg?: string | undefined;
+  responsePayload?: Record<string, any> | undefined;
+  guestToken?: string | undefined;
+  guest_token?: string | undefined;
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   if (!isSupabaseConfigured) {
     return {
@@ -433,7 +437,7 @@ export async function handlePayUFailureServerSide(params: {
           txnid: params.txnid,
           error_code: params.errorCode || "FAILED",
           error_msg: params.errorMsg || "Payment cancelled or declined",
-          guest_token: params.guestToken,
+          guest_token: params.guestToken || params.guest_token,
         },
       });
 
