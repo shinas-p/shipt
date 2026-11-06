@@ -14,6 +14,9 @@ export interface CustomerProfile {
   verified_no_show_count?: number;
   cash_restricted?: boolean;
   cash_restriction_reason?: string | null;
+  cancellation_count?: number;
+  is_blocked?: boolean;
+  blocked_reason?: string | null;
   default_hostel: string | null;
   default_block: string | null;
   default_room: string | null;
@@ -103,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let { data, error } = await supabase
         .from("profiles")
-        .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url, payment_policy, verified_no_show_count, cash_restricted, cash_restriction_reason, student_id")
+        .select("id, full_name, phone, default_hostel, default_block, default_room, avatar_url, payment_policy, verified_no_show_count, cash_restricted, cash_restriction_reason, student_id, is_blocked, blocked_reason, cancellation_count")
         .eq("id", userId)
         .maybeSingle();
 
@@ -121,6 +124,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             cash_restricted: false,
             cash_restriction_reason: null,
             student_id: null,
+            is_blocked: false,
+            blocked_reason: null,
+            cancellation_count: 0,
           };
         } else {
           data = null;

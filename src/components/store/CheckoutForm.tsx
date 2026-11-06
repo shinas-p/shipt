@@ -13,7 +13,9 @@ import {
   Loader2,
   Info,
   User,
-  CreditCard,
+  Clock,
+  QrCode,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
@@ -21,13 +23,12 @@ import { useCustomerAuth } from "@/lib/auth";
 import { formatINR } from "@/data/products";
 import type { CheckoutFormData, PlacedOrderResult, DeliveryBlock, StorePaymentSettings } from "@/lib/types";
 import { placeOrder, loadActiveDeliveryBlocks } from "@/lib/catalogApi";
-import { loadStorePaymentSettings, DEFAULT_STORE_PAYMENT_SETTINGS } from "@/lib/studentPaymentApi";
 import {
-  preparePayUCheckout,
-  submitPayUHostedForm,
-  handlePayUFailureServerSide,
-  verifyPayUTransactionViaServerAPI,
-} from "@/lib/payuApi";
+  loadStorePaymentSettings,
+  DEFAULT_STORE_PAYMENT_SETTINGS,
+  submitOrderPaymentProof,
+} from "@/lib/studentPaymentApi";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -40,7 +41,13 @@ const PICKUP_LOCATIONS = [
 
 type Errors = Partial<Record<keyof CheckoutFormData, string | undefined>>;
 
-function validate(f: CheckoutFormData, cashAllowed = true, onlineAllowed = true): Errors {
+function validate(
+  f: CheckoutFormData,
+  cashAllowed = true,
+  onlineAllowed = true,
+  settings?: StorePaymentSettings,
+  totalAmount?: number
+): Errors {
   const e: Errors = {};
   if (f.name.trim().length < 2) e.name = "Please enter your full name (at least 2 characters).";
   if (!/^[6-9]\d{9}$/.test(f.phone.replace(/\s/g, "")))
@@ -53,11 +60,16 @@ function validate(f: CheckoutFormData, cashAllowed = true, onlineAllowed = true)
     if (!f.pickupLocation) e.pickupLocation = "Select a pickup location.";
   }
 
-  if (f.payment === "cod" && !cashAllowed) {
-    e.payment = "Cash on Delivery is unavailable for your account or disabled by store policy.";
+  if (f.payment === "cod") {
+    if (!cashAllowed) {
+      e.payment = "Cash on Delivery is unavailable for your account or disabled by store policy.";
+    } else if (settings?.max_cod_order_amount && totalAmount && totalAmount > settings.max_cod_order_amount) {
+      e.payment = `Cash on Delivery is limited to orders up to ₹${settings.max_cod_order_amount}. Please select Direct UPI.`;
+    }
   }
-  if ((f.payment === "upi" || f.payment === "payu") && !onlineAllowed) {
-    e.payment = "Online payment via PayU is unavailable for your account or disabled by store policy.";
+
+  if (f.payment === "upi" && !onlineAllowed) {
+    e.payment = "Direct UPI payment is unavailable for your account or disabled by store policy.";
   }
 
   return e;
@@ -121,9 +133,9 @@ export function CheckoutForm() {
 
   const studentPolicy = profile?.payment_policy || "default";
   const isCashRestricted = !!profile?.cash_restricted;
+  const isBlocked = !!profile?.is_blocked;
 
-  // Authoritative payment method eligibility evaluation
-  const isCashAllowed = storePaymentSettings.cash_payment_enabled && (
+  const isCashAllowed = !isBlocked && storePaymentSettings.cash_payment_enabled && (
     !user
       ? storePaymentSettings.guest_cash_allowed
       : studentPolicy === "cash_only"
@@ -135,7 +147,7 @@ export function CheckoutForm() {
             : !isCashRestricted
   );
 
-  const isOnlineAllowed = storePaymentSettings.online_payment_enabled && (
+  const isOnlineAllowed = !isBlocked && storePaymentSettings.online_payment_enabled && (
     !user || studentPolicy !== "cash_only"
   );
 
@@ -209,15 +221,27 @@ export function CheckoutForm() {
       return null;
     }
   });
+
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedOrderNo, setCopiedOrderNo] = useState(false);
-  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
-  const [verificationPending, setVerificationPending] = useState<{
-    orderId: string;
-    orderNumber?: string | undefined;
-    txnid?: string | undefined;
-  } | null>(null);
-  const [isRetryingVerification, setIsRetryingVerification] = useState(false);
+  const [copiedUpiId, setCopiedUpiId] = useState(false);
+
+  // Direct UPI Interactive State
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [upiReference, setUpiReference] = useState("");
+  const [postOrderScreenshotFile, setPostOrderScreenshotFile] = useState<File | null>(null);
+  const [postOrderScreenshotPreview, setPostOrderScreenshotPreview] = useState<string | null>(null);
+  const [postOrderUpiRef, setPostOrderUpiRef] = useState("");
+  const [isSubmittingPostProof, setIsSubmittingPostProof] = useState(false);
+
+  const deliveryFee = f.deliveryMethod === "hostel_delivery" ? (subtotal > 300 ? 0 : 0) : 0;
+  const total = subtotal + deliveryFee;
+
+  const upiId = storePaymentSettings.upi_id || "9605174298@upi";
+  const payeeName = storePaymentSettings.upi_payee_name || "Shipt Mart";
+  const upiUri = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${total.toFixed(2)}&cu=INR&tn=${encodeURIComponent("Shipt Mart Order")}`;
+  const qrCodeUrl = storePaymentSettings.upi_qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(upiUri)}`;
 
   const set = <K extends keyof CheckoutFormData>(k: K, v: CheckoutFormData[K]) => {
     setF((p) => ({ ...p, [k]: v }));
@@ -241,6 +265,93 @@ export function CheckoutForm() {
     }
   };
 
+  const copyUpiId = () => {
+    navigator.clipboard.writeText(upiId);
+    setCopiedUpiId(true);
+    toast.success("UPI ID copied to clipboard!");
+    setTimeout(() => setCopiedUpiId(false), 2000);
+  };
+
+  const handleScreenshotChange = (file: File | null) => {
+    if (!file) {
+      setScreenshotFile(null);
+      if (screenshotPreview) URL.revokeObjectURL(screenshotPreview);
+      setScreenshotPreview(null);
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Please upload a JPG, PNG, or WEBP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Screenshot file size must be less than 5 MB.");
+      return;
+    }
+    setScreenshotFile(file);
+    const previewUrl = URL.createObjectURL(file);
+    setScreenshotPreview(previewUrl);
+  };
+
+  const handlePostOrderScreenshotChange = (file: File | null) => {
+    if (!file) {
+      setPostOrderScreenshotFile(null);
+      if (postOrderScreenshotPreview) URL.revokeObjectURL(postOrderScreenshotPreview);
+      setPostOrderScreenshotPreview(null);
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Please upload a JPG, PNG, or WEBP image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Screenshot file size must be less than 5 MB.");
+      return;
+    }
+    setPostOrderScreenshotFile(file);
+    const previewUrl = URL.createObjectURL(file);
+    setPostOrderScreenshotPreview(previewUrl);
+  };
+
+  const handlePostOrderProofSubmit = async () => {
+    if (!done || !postOrderScreenshotFile) return;
+    setIsSubmittingPostProof(true);
+    try {
+      const fileExt = postOrderScreenshotFile.name.split(".").pop()?.toLowerCase() || "jpg";
+      const storagePath = `${user?.id || "anonymous"}/${done.order_id}_${Date.now()}.${fileExt}`;
+
+      if (isSupabaseConfigured) {
+        const { error: uploadErr } = await supabase.storage
+          .from("payment-screenshots")
+          .upload(storagePath, postOrderScreenshotFile, { upsert: false });
+
+        if (uploadErr) {
+          toast.error("Screenshot upload failed: " + uploadErr.message);
+          return;
+        }
+
+        const proofRes = await submitOrderPaymentProof(done.order_id, storagePath, postOrderUpiRef);
+        if (!proofRes.success) {
+          toast.error("Proof submission failed: " + proofRes.error);
+          return;
+        }
+      }
+
+      const updatedDone: PlacedOrderResult = {
+        ...done,
+        payment_status: "verification_pending",
+      };
+      setDone(updatedDone);
+      try {
+        sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(updatedDone));
+      } catch { }
+      toast.success("Payment proof submitted! Staff will verify your transaction against our bank ledger.");
+    } catch (err: any) {
+      toast.error(err?.message || "Could not submit payment proof.");
+    } finally {
+      setIsSubmittingPostProof(false);
+    }
+  };
+
   const handleClearOrderSession = () => {
     try {
       sessionStorage.removeItem(SESSION_ORDER_KEY);
@@ -248,115 +359,12 @@ export function CheckoutForm() {
     setDone(null);
   };
 
-  // Handle PayU Return Callback (success or failure)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const payuStatus = params.get("payu_status");
-    const txnid = params.get("txnid");
-    const orderId = params.get("order_id");
-    const orderNum = params.get("order_number");
-
-    if (payuStatus) {
-      if (payuStatus === "success" && (orderId || txnid)) {
-        setIsVerifyingPayment(true);
-        setSubmitError(null);
-
-        const checkAndConfirmOrder = async () => {
-          try {
-            // 1. Direct check in database: Has server-side callback/webhook already marked it paid?
-            if (isSupabaseConfigured && orderId) {
-              const { data: dbOrder } = await supabase
-                .from("orders")
-                .select("id, order_number, total_amount, subtotal, delivery_fee, discount_amount, status, payment_status, guest_tracking_token, customer_name, customer_phone, delivery_method, delivery_block_id, hostel, block, room, pickup_location, delivery_instructions, payment_method, created_at")
-                .eq("id", orderId)
-                .maybeSingle();
-
-              if (dbOrder && (dbOrder.payment_status === "paid" || dbOrder.status === "placed")) {
-                const confirmedResult: PlacedOrderResult = {
-                  order_id: dbOrder.id,
-                  order_number: dbOrder.order_number,
-                  total_amount: Number(dbOrder.total_amount),
-                  status: dbOrder.status,
-                  payment_method: dbOrder.payment_method || "payu",
-                  payment_status: dbOrder.payment_status || "paid",
-                  guest_tracking_token: dbOrder.guest_tracking_token || null,
-                  delivery_block_id: dbOrder.delivery_block_id || null,
-                };
-                setDone(confirmedResult);
-                try {
-                  sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(confirmedResult));
-                } catch { }
-                clear();
-                setIsVerifyingPayment(false);
-                const cleanUrl = window.location.pathname;
-                window.history.replaceState({}, document.title, cleanUrl);
-                return;
-              }
-            }
-
-            // 2. If not yet confirmed in DB, verify through Server Verify Payment API
-            const serverVerifyRes = await verifyPayUTransactionViaServerAPI({
-              orderId: orderId ?? undefined,
-              txnid: txnid ?? undefined,
-            });
-
-            if (serverVerifyRes.success && serverVerifyRes.verified) {
-              const confirmedResult: PlacedOrderResult = {
-                order_id: serverVerifyRes.data?.order_id || orderId || "",
-                order_number: serverVerifyRes.data?.order_number || orderNum || "QM-ORDER",
-                total_amount: Number(serverVerifyRes.data?.total_amount || 0),
-                status: "placed",
-                payment_method: "payu",
-                payment_status: "paid",
-                guest_tracking_token: serverVerifyRes.data?.guest_tracking_token || null,
-                delivery_block_id: f.deliveryBlockId || null,
-              };
-              setDone(confirmedResult);
-              try {
-                sessionStorage.setItem(SESSION_ORDER_KEY, JSON.stringify(confirmedResult));
-              } catch { }
-              clear();
-              setIsVerifyingPayment(false);
-              const cleanUrl = window.location.pathname;
-              window.history.replaceState({}, document.title, cleanUrl);
-              return;
-            }
-
-            // 3. Payment is not yet confirmed by gateway — show pending verification screen with manual retry
-            // Never confirm order using client-supplied parameters
-            setVerificationPending({
-              orderId: orderId || "",
-              orderNumber: orderNum ?? undefined,
-              txnid: txnid ?? undefined,
-            });
-          } catch {
-            setVerificationPending({
-              orderId: orderId || "",
-              orderNumber: orderNum ?? undefined,
-              txnid: txnid ?? undefined,
-            });
-          } finally {
-            setIsVerifyingPayment(false);
-          }
-        };
-
-        checkAndConfirmOrder();
-      } else if (payuStatus === "failed") {
-        setSubmitError("Your PayU payment was cancelled or declined. You can adjust your details and retry checkout.");
-        handlePayUFailureServerSide({
-          orderId,
-          txnid: txnid || "",
-          errorCode: params.get("error") || "CANCELLED",
-          errorMsg: params.get("error_Message") || "Payment cancelled or declined",
-        });
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
-      }
-    }
-  }, []);
-
   if (done) {
+    const isUpiOrder = done.payment_method === "upi" || done.payment_method === "payu";
+    const isCodOrder = done.payment_method === "cod";
+    const isAwaitingVerification = done.payment_status === "verification_pending";
+    const isAwaitingApproval = done.status === "awaiting_approval";
+
     return (
       <div className="mx-auto mt-8 max-w-xl rounded-3xl border border-border bg-card p-6 text-center shadow-soft sm:p-10">
         <div className="mx-auto grid size-16 place-items-center rounded-full bg-primary/10 text-primary">
@@ -364,13 +372,21 @@ export function CheckoutForm() {
         </div>
 
         <h2 className="mt-4 font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-          Order Placed Successfully!
+          {isAwaitingApproval
+            ? "Order Received — Awaiting Approval"
+            : isAwaitingVerification
+              ? "Payment Proof Submitted!"
+              : "Order Placed Successfully!"}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your order has been recorded and will be prepared shortly for delivery.
+          {isAwaitingApproval
+            ? "Your first-time Cash on Delivery order is pending quick review by staff before fulfillment."
+            : isAwaitingVerification
+              ? "We received your payment receipt. Store staff will verify it against our ledger shortly."
+              : "Your order has been recorded and will be prepared shortly for delivery."}
         </p>
 
-        {/* Order Details & Secret Token Card */}
+        {/* Order Details Card */}
         <div className="mt-6 space-y-4 rounded-3xl border border-border/80 bg-secondary/30 p-5 text-left text-sm">
           {/* Order Number */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-border/60 pb-3 gap-2">
@@ -393,88 +409,140 @@ export function CheckoutForm() {
             </Button>
           </div>
 
-          {/* Guest Tracking Token */}
-          {done.guest_tracking_token && (
-            <div className="border-b border-border/60 pb-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                    Guest Tracking Token
-                  </span>
-                  <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                    Private Secret
-                  </span>
+          {/* Payment Status Notice */}
+          {isUpiOrder && (
+            <div className="border-b border-border/60 pb-3">
+              {isAwaitingVerification ? (
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs space-y-1">
+                  <p className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    <Clock className="size-4" /> Verification Pending
+                  </p>
+                  <p className="text-muted-foreground text-[11px]">
+                    Your payment screenshot is under manual review. Once confirmed against our bank records, your order status will update to Confirmed.
+                  </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => copyToClipboard(done.guest_tracking_token || "", "token")}
-                  className="gap-1.5 text-xs shrink-0"
-                >
-                  {copiedToken ? <Check className="size-3.5 text-primary" /> : <Copy className="size-3.5" />}
-                  <span>{copiedToken ? "Copied" : "Copy Token"}</span>
-                </Button>
-              </div>
+              ) : done.payment_status === "paid" ? (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs space-y-1">
+                  <p className="font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                    <CheckCircle2 className="size-4" /> Payment Confirmed
+                  </p>
+                  <p className="text-muted-foreground text-[11px]">
+                    Your payment has been verified by staff.
+                  </p>
+                </div>
+              ) : (
+                /* Customer chose UPI but didn't upload screenshot during checkout */
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-foreground">Upload Payment Proof</span>
+                    <span className="text-[11px] font-mono text-primary font-bold">UPI: {upiId}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Pay ₹{formatINR(done.total_amount || total)} via UPI and upload your transaction screenshot below to complete verification:
+                  </p>
 
-              <div className="rounded-xl border border-border/70 bg-card p-3">
-                <p className="break-all font-mono text-xs text-foreground/90 select-all">
-                  {done.guest_tracking_token}
-                </p>
-              </div>
+                  {postOrderScreenshotPreview ? (
+                    <div className="flex items-center gap-2 p-2 rounded-xl bg-card border border-border">
+                      <img src={postOrderScreenshotPreview} alt="Proof" className="size-12 rounded object-cover" />
+                      <span className="text-xs truncate flex-1 font-medium">{postOrderScreenshotFile?.name}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePostOrderScreenshotChange(null)}
+                        className="text-xs h-7 px-2"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="block border-2 border-dashed border-border rounded-xl p-3 text-center cursor-pointer hover:border-primary/50 transition">
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => handlePostOrderScreenshotChange(e.target.files?.[0] || null)}
+                        className="sr-only"
+                      />
+                      <span className="text-xs text-primary font-semibold">Select Screenshot Image</span>
+                    </label>
+                  )}
 
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Save both your <strong>Order Number</strong> and this <strong>Private Token</strong> to track live delivery progress. Unauthorized users without this token cannot view your order.
-              </p>
+                  <input
+                    type="text"
+                    placeholder="Optional 12-digit UPI / UTR Reference"
+                    value={postOrderUpiRef}
+                    onChange={(e) => setPostOrderUpiRef(e.target.value)}
+                    className={cn(inputCls, "h-9 text-xs")}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="hero"
+                    size="sm"
+                    disabled={!postOrderScreenshotFile || isSubmittingPostProof}
+                    onClick={handlePostOrderProofSubmit}
+                    className="w-full text-xs font-bold h-9"
+                  >
+                    {isSubmittingPostProof ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin mr-1.5" />
+                        Uploading Proof...
+                      </>
+                    ) : (
+                      "Submit Screenshot for Verification"
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isCodOrder && (
+            <div className="border-b border-border/60 pb-3">
+              {isAwaitingApproval ? (
+                <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3.5 text-xs space-y-1">
+                  <p className="font-bold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                    <Info className="size-4" /> First-Time Customer Review
+                  </p>
+                  <p className="text-muted-foreground text-[11px]">
+                    Our staff will review and approve your first COD order shortly. Payment will be collected in cash upon delivery.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-border bg-card p-3 text-xs space-y-1">
+                  <p className="font-semibold text-foreground">Cash on Delivery</p>
+                  <p className="text-muted-foreground text-[11px]">
+                    Please keep exact cash ready upon parcel delivery or collection.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3 pt-1 text-xs sm:text-sm">
             <div>
               <span className="text-muted-foreground">Payment Method:</span>
-              <p className="font-semibold uppercase text-foreground">{done.payment_method}</p>
+              <p className="font-semibold uppercase text-foreground">
+                {done.payment_method === "upi" ? "Direct UPI" : "Cash on Delivery"}
+              </p>
             </div>
             <div>
-              <span className="text-muted-foreground">Verified Total:</span>
-              <p className="font-bold text-foreground">{formatINR(done.total_amount || subtotal)}</p>
+              <span className="text-muted-foreground">Order Total:</span>
+              <p className="font-bold text-foreground">{formatINR(done.total_amount || total)}</p>
             </div>
           </div>
         </div>
 
-        {/* Phase 3 Guest-to-Account Invitation */}
-        {!user && done.guest_tracking_token && (
-          <div className="mt-6 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5 text-left">
-            <div className="flex items-start gap-3">
-              <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
-                <User className="size-5" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-bold text-foreground">Save your details for future orders</h3>
-                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Create a free Shipt Mart account to save your delivery address for 1-click checkout, view past orders, and track deliveries.
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <Button asChild variant="default" size="sm" className="gap-1.5 h-9 px-4 text-xs font-semibold">
-                    <Link to="/account">Create Free Account</Link>
-                  </Button>
-                </div>
-              </div>
-            </div>
+        {/* Account Dashboard Quick Link */}
+        <div className="mt-6 rounded-2xl border border-border bg-secondary/30 p-4 text-left flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground">Track Live Status</p>
+            <p className="text-sm font-bold text-foreground">View and manage this order in your account.</p>
           </div>
-        )}
-
-        {/* Authenticated user quick link */}
-        {user && (
-          <div className="mt-6 rounded-2xl border border-border bg-secondary/30 p-4 text-left flex items-center justify-between">
-            <div>
-              <p className="text-xs text-muted-foreground">Saved to your account</p>
-              <p className="text-sm font-bold text-foreground">View this order anytime in your account dashboard.</p>
-            </div>
-            <Button asChild variant="outline" size="sm" className="ml-3 shrink-0 text-xs">
-              <Link to="/account">View in My Orders</Link>
-            </Button>
-          </div>
-        )}
+          <Button asChild variant="outline" size="sm" className="ml-3 shrink-0 text-xs">
+            <Link to="/account">My Orders</Link>
+          </Button>
+        </div>
 
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button
@@ -488,81 +556,6 @@ export function CheckoutForm() {
 
           <Button asChild variant="outline" className="h-11 px-6 text-xs">
             <Link to="/">Browse Catalogue</Link>
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (isVerifyingPayment) {
-    return (
-      <div className="mx-auto mt-8 max-w-lg rounded-3xl border border-border bg-card p-10 text-center shadow-soft">
-        <Loader2 className="mx-auto size-12 animate-spin text-primary" />
-        <h2 className="mt-4 font-display text-xl font-bold text-foreground">Verifying Your Payment...</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Confirming your transaction with PayU. Please do not close, refresh, or leave this page.
-        </p>
-      </div>
-    );
-  }
-
-  if (verificationPending) {
-    return (
-      <div className="mx-auto mt-8 max-w-lg rounded-3xl border border-amber-500/30 bg-amber-500/10 p-8 text-center shadow-soft">
-        <div className="mx-auto grid size-12 place-items-center rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400">
-          <Loader2 className={cn("size-6", isRetryingVerification && "animate-spin")} />
-        </div>
-        <h2 className="mt-4 font-display text-xl font-bold text-foreground">
-          Payment Verification in Progress
-        </h2>
-        {verificationPending.orderNumber && (
-          <p className="mt-1 font-mono text-sm font-semibold text-foreground">
-            Order Reference: {verificationPending.orderNumber}
-          </p>
-        )}
-        <p className="mt-2 text-xs text-muted-foreground sm:text-sm">
-          We have recorded your order and are awaiting final settlement confirmation from your bank/UPI gateway. You will not be charged again.
-        </p>
-
-        <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Button
-            type="button"
-            variant="hero"
-            disabled={isRetryingVerification}
-            onClick={async () => {
-              setIsRetryingVerification(true);
-              try {
-                const res = await verifyPayUTransactionViaServerAPI({
-                  orderId: verificationPending.orderId,
-                  txnid: verificationPending.txnid ?? undefined,
-                });
-                if (res.success && res.verified) {
-                  setDone(res.data);
-                  setVerificationPending(null);
-                  clear();
-                } else {
-                  toast.info(res.error || "Payment is still being processed by the bank. Please try again in a few moments.");
-                }
-              } catch {
-                toast.error("Could not check payment status at this moment.");
-              } finally {
-                setIsRetryingVerification(false);
-              }
-            }}
-            className="w-full sm:w-auto"
-          >
-            {isRetryingVerification ? (
-              <>
-                <Loader2 className="size-4 animate-spin mr-2" />
-                Checking Gateway...
-              </>
-            ) : (
-              "Check Status Now"
-            )}
-          </Button>
-
-          <Button asChild variant="outline" className="w-full sm:w-auto">
-            <Link to="/">Continue to Home</Link>
           </Button>
         </div>
       </div>
@@ -588,12 +581,17 @@ export function CheckoutForm() {
     e.preventDefault();
     setSubmitError(null);
 
+    if (!user) {
+      setSubmitError("Sign-in required: Guest checkout is disabled. Please log in to your account.");
+      return;
+    }
+
     if (unavailableItems.length > 0) {
       setSubmitError("Your cart contains archived or unavailable products. Please return to your cart and remove them before placing an order.");
       return;
     }
 
-    const errs = validate(f, isCashAllowed, isOnlineAllowed);
+    const errs = validate(f, isCashAllowed, isOnlineAllowed, storePaymentSettings, total);
     setErrors(errs);
     if (Object.keys(errs).length) {
       document.getElementById(Object.keys(errs)[0] ?? "")?.focus();
@@ -611,29 +609,30 @@ export function CheckoutForm() {
       }
 
       const placedOrder = res.data;
-      if (f.payment === "upi" || f.payment === "payu") {
+
+      // If Direct UPI and screenshot is attached, upload to private bucket
+      if (f.payment === "upi" && screenshotFile) {
         try {
-          const payuPayload = await preparePayUCheckout({
-            order_id: placedOrder.order_id,
-            order_number: placedOrder.order_number,
-            amount: placedOrder.total_amount,
-            product_info: `Shipt Mart Order #${placedOrder.order_number}`,
-            customer_name: f.name,
-            customer_email: user?.email || "student@campus.edu",
-            customer_phone: f.phone,
-          });
+          const fileExt = screenshotFile.name.split(".").pop()?.toLowerCase() || "jpg";
+          const storagePath = `${user.id}/${placedOrder.order_id}_${Date.now()}.${fileExt}`;
 
-          // In browser runtime (when not running unit tests), redirect customer to PayU Hosted Checkout
-          const isTestEnvironment =
-            (typeof process !== "undefined" && (!!process.env["VITEST"] || process.env["NODE_ENV"] === "test")) ||
-            (import.meta as any).env?.MODE === "test" ||
-            (typeof window !== "undefined" && (window as any).__VITEST__);
+          if (isSupabaseConfigured) {
+            const { error: uploadErr } = await supabase.storage
+              .from("payment-screenshots")
+              .upload(storagePath, screenshotFile, { upsert: false });
 
-          if (typeof window !== "undefined" && !isTestEnvironment) {
-            submitPayUHostedForm(payuPayload);
-            return;
+            if (!uploadErr) {
+              await submitOrderPaymentProof(placedOrder.order_id, storagePath, upiReference);
+              placedOrder.payment_status = "verification_pending";
+            } else {
+              console.warn("Screenshot upload warning:", uploadErr);
+            }
+          } else {
+            placedOrder.payment_status = "verification_pending";
           }
-        } catch { }
+        } catch (uploadErr) {
+          console.warn("Payment proof submission error", uploadErr);
+        }
       }
 
       setDone(placedOrder);
@@ -663,13 +662,13 @@ export function CheckoutForm() {
           </div>
         )}
 
-        {/* Customer Account State Status Banner */}
+        {/* Customer Account State Status Banner / Sign-In Guard */}
         {user ? (
           <div className="flex items-center justify-between rounded-2xl border border-primary/20 bg-primary/5 p-3.5 text-xs sm:text-sm">
             <div className="flex items-center gap-2 text-foreground">
               <CheckCircle2 className="size-4 text-primary shrink-0" />
               <span>
-                Signed in as <strong>{profile?.full_name || user.email}</strong>. Saved delivery details auto-applied.
+                Signed in as <strong>{profile?.full_name || user.email}</strong>. Delivery details auto-applied.
               </span>
             </div>
             <Link to="/account" className="font-semibold text-primary hover:underline text-xs shrink-0 ml-2">
@@ -677,11 +676,26 @@ export function CheckoutForm() {
             </Link>
           </div>
         ) : (
-          <div className="flex items-center justify-between rounded-2xl border border-border bg-secondary/50 p-3.5 text-xs sm:text-sm">
-            <span className="text-muted-foreground">Checking out as Guest. No account required.</span>
-            <Link to="/account" className="font-semibold text-primary hover:underline text-xs shrink-0 ml-2">
-              Sign In / Register
-            </Link>
+          <div className="rounded-3xl border border-primary/30 bg-primary/5 p-6 text-center space-y-4">
+            <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+              <User className="size-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="font-display text-lg font-bold text-foreground">
+                Student Account Required
+              </h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+                To prevent uncollected orders and maintain campus delivery reliability, guest checkout is disabled. Please sign in or register to place your order.
+              </p>
+            </div>
+            <div className="max-w-xs mx-auto space-y-2.5 pt-2">
+              <GoogleSignInButton returnTo="/checkout" text="Sign in with Google" />
+              <Button asChild variant="outline" size="sm" className="w-full text-xs font-semibold h-10">
+                <Link to="/account" search={{ returnTo: "/checkout" }}>
+                  Sign In or Register with Email
+                </Link>
+              </Button>
+            </div>
           </div>
         )}
 
@@ -697,6 +711,7 @@ export function CheckoutForm() {
                 onChange={(e) => set("name", e.target.value)}
                 autoComplete="name"
                 placeholder="e.g. Salman Faris"
+                disabled={!user}
               />
             </Field>
             <Field id="phone" label="Mobile number" error={errors.phone}>
@@ -708,6 +723,7 @@ export function CheckoutForm() {
                 onChange={(e) => set("phone", e.target.value)}
                 autoComplete="tel"
                 placeholder="10-digit mobile number"
+                disabled={!user}
               />
             </Field>
           </div>
@@ -720,10 +736,8 @@ export function CheckoutForm() {
           <div className="grid gap-3 sm:grid-cols-2" role="radiogroup">
             <label
               className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-4 transition",
-                f.deliveryMethod === "hostel_delivery"
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/40"
+                "flex items-center gap-3 rounded-2xl border-2 p-4 cursor-pointer transition",
+                f.deliveryMethod === "hostel_delivery" ? "border-primary bg-primary/5" : "border-border"
               )}
             >
               <input
@@ -733,24 +747,23 @@ export function CheckoutForm() {
                 checked={f.deliveryMethod === "hostel_delivery"}
                 onChange={() => set("deliveryMethod", "hostel_delivery")}
                 className="sr-only"
+                disabled={!user}
               />
               <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
                 <Building className="size-5" />
               </span>
-              <span>
-                <span className="block font-semibold">Doorstep Delivery</span>
+              <div className="min-w-0 flex-1">
+                <span className="block font-semibold">Hostel Delivery</span>
                 <span className="block text-xs text-muted-foreground">
-                  Direct delivery straight to your door
+                  Delivered directly to your hostel block & room
                 </span>
-              </span>
+              </div>
             </label>
 
             <label
               className={cn(
-                "flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-4 transition",
-                f.deliveryMethod === "campus_pickup"
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/40"
+                "flex items-center gap-3 rounded-2xl border-2 p-4 cursor-pointer transition",
+                f.deliveryMethod === "campus_pickup" ? "border-primary bg-primary/5" : "border-border"
               )}
             >
               <input
@@ -760,16 +773,17 @@ export function CheckoutForm() {
                 checked={f.deliveryMethod === "campus_pickup"}
                 onChange={() => set("deliveryMethod", "campus_pickup")}
                 className="sr-only"
+                disabled={!user}
               />
               <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
                 <MapPin className="size-5" />
               </span>
-              <span>
-                <span className="block font-semibold">Store / Counter Pickup</span>
+              <div className="min-w-0 flex-1">
+                <span className="block font-semibold">Campus Pickup</span>
                 <span className="block text-xs text-muted-foreground">
-                  Pick up at our local central hub or kiosk
+                  Pick up at central store hub or kiosk
                 </span>
-              </span>
+              </div>
             </label>
           </div>
 
@@ -791,7 +805,7 @@ export function CheckoutForm() {
                     }));
                     setErrors((err) => ({ ...err, deliveryBlockId: undefined, block: undefined }));
                   }}
-                  disabled={loadingBlocks}
+                  disabled={loadingBlocks || !user}
                 >
                   <option value="">
                     {loadingBlocks ? "Loading available delivery blocks..." : "Select your delivery block"}
@@ -811,6 +825,7 @@ export function CheckoutForm() {
                   value={f.room}
                   onChange={(e) => set("room", e.target.value)}
                   placeholder="e.g. 204 or Ground Floor A-1"
+                  disabled={!user}
                 />
               </Field>
 
@@ -822,6 +837,7 @@ export function CheckoutForm() {
                     value={f.instructions}
                     onChange={(e) => set("instructions", e.target.value)}
                     placeholder="e.g. Call upon arrival or leave at front door / reception"
+                    disabled={!user}
                   />
                 </Field>
               </div>
@@ -834,6 +850,7 @@ export function CheckoutForm() {
                   className={inputCls}
                   value={f.pickupLocation}
                   onChange={(e) => set("pickupLocation", e.target.value)}
+                  disabled={!user}
                 >
                   {PICKUP_LOCATIONS.map((loc) => (
                     <option key={loc} value={loc}>
@@ -842,9 +859,6 @@ export function CheckoutForm() {
                   ))}
                 </select>
               </Field>
-              <p className="mt-2 text-xs text-muted-foreground">
-                You will receive a notification and order number once your parcel is packed and ready at the counter.
-              </p>
             </div>
           )}
         </fieldset>
@@ -866,36 +880,36 @@ export function CheckoutForm() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2" role="radiogroup">
-            {/* PayU Online Option */}
+            {/* Direct UPI Option */}
             <label
               className={cn(
                 "flex items-center gap-3 rounded-2xl border-2 p-4 transition",
-                isOnlineAllowed
+                isOnlineAllowed && user
                   ? "cursor-pointer hover:border-primary/40"
                   : "cursor-not-allowed opacity-50 bg-muted/40",
-                f.payment === "upi" || f.payment === "payu" ? "border-primary bg-primary/5" : "border-border"
+                f.payment === "upi" ? "border-primary bg-primary/5" : "border-border"
               )}
             >
               <input
                 type="radio"
                 name="payment"
                 value="upi"
-                disabled={!isOnlineAllowed}
-                checked={f.payment === "upi" || f.payment === "payu"}
+                disabled={!isOnlineAllowed || !user}
+                checked={f.payment === "upi"}
                 onChange={() => isOnlineAllowed && set("payment", "upi")}
                 className="sr-only"
               />
               <span className="grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                <CreditCard className="size-5" />
+                <Smartphone className="size-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <span className="block font-semibold">Pay Online (PayU Gateway)</span>
+                <span className="block font-semibold">Direct UPI Payment</span>
                 <span className="block text-xs text-muted-foreground">
-                  UPI, Cards & Net Banking via PayU
+                  GPay, PhonePe, Paytm QR & Screenshot
                 </span>
                 {!isOnlineAllowed && (
                   <span className="mt-1 block text-[10px] font-bold text-destructive">
-                    Online payment disabled by account policy
+                    UPI payment disabled by policy
                   </span>
                 )}
               </div>
@@ -905,7 +919,7 @@ export function CheckoutForm() {
             <label
               className={cn(
                 "flex items-center gap-3 rounded-2xl border-2 p-4 transition",
-                isCashAllowed
+                isCashAllowed && user
                   ? "cursor-pointer hover:border-primary/40"
                   : "cursor-not-allowed opacity-50 bg-muted/40",
                 f.payment === "cod" ? "border-primary bg-primary/5" : "border-border"
@@ -915,7 +929,7 @@ export function CheckoutForm() {
                 type="radio"
                 name="payment"
                 value="cod"
-                disabled={!isCashAllowed}
+                disabled={!isCashAllowed || !user}
                 checked={f.payment === "cod"}
                 onChange={() => isCashAllowed && set("payment", "cod")}
                 className="sr-only"
@@ -926,7 +940,7 @@ export function CheckoutForm() {
               <div className="min-w-0 flex-1">
                 <span className="block font-semibold">Cash on Delivery</span>
                 <span className="block text-xs text-muted-foreground">
-                  Pay exact cash upon receipt
+                  Pay cash upon receipt (Max ₹{storePaymentSettings.max_cod_order_amount || 500})
                 </span>
                 {!isCashAllowed && (
                   <span className="mt-1 block text-[10px] font-bold text-destructive">
@@ -936,29 +950,166 @@ export function CheckoutForm() {
                         ? "Restricted due to uncollected orders"
                         : !storePaymentSettings.cash_payment_enabled
                           ? "Cash orders disabled store-wide"
-                          : !user && !storePaymentSettings.guest_cash_allowed
-                            ? "Sign-in required for cash orders"
-                            : "Cash unavailable"}
+                          : "Cash unavailable"}
                   </span>
                 )}
               </div>
             </label>
           </div>
 
+          {/* Interactive Direct UPI Payment Guide & Screenshot Uploader */}
+          {f.payment === "upi" && (
+            <div className="mt-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-primary/10 pb-4">
+                <div className="space-y-1 text-center sm:text-left">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                    Payable Amount
+                  </span>
+                  <p className="font-display text-2xl font-black text-foreground">
+                    {formatINR(total)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Payee: <strong>{payeeName}</strong>
+                  </p>
+                </div>
+
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-xl bg-card border border-border px-3 py-2 text-xs font-mono">
+                    <span>{upiId}</span>
+                    <button
+                      type="button"
+                      onClick={copyUpiId}
+                      className="text-primary hover:text-primary/80 transition"
+                      title="Copy UPI ID"
+                    >
+                      {copiedUpiId ? <Check className="size-4 text-emerald-600" /> : <Copy className="size-4" />}
+                    </button>
+                  </div>
+                  <a
+                    href={upiUri}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+                  >
+                    <Smartphone className="size-3.5" />
+                    Open in UPI App (Mobile)
+                  </a>
+                </div>
+              </div>
+
+              {/* QR Code and Instructions */}
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="shrink-0 p-2 bg-white rounded-2xl border border-border shadow-xs">
+                  <img
+                    src={qrCodeUrl}
+                    alt="Shipt Mart UPI QR Code"
+                    className="size-36 sm:size-40 object-contain rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2 text-xs text-muted-foreground leading-relaxed text-center sm:text-left">
+                  <p className="font-semibold text-foreground">How to complete your payment:</p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Scan the QR code with Google Pay, PhonePe, Paytm, or BHIM.</li>
+                    <li>Verify the exact amount (<strong>{formatINR(total)}</strong>).</li>
+                    <li>Capture a screenshot of your successful transaction.</li>
+                    <li>Attach the screenshot below for admin verification.</li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Screenshot File Upload */}
+              <div className="pt-2 border-t border-primary/10 space-y-3">
+                <label className="block text-xs font-bold text-foreground">
+                  Upload Payment Screenshot (JPG, PNG, WEBP · Max 5MB)
+                </label>
+
+                {screenshotPreview ? (
+                  <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
+                    <img
+                      src={screenshotPreview}
+                      alt="Screenshot preview"
+                      className="size-16 rounded-lg object-cover border border-border shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">
+                        {screenshotFile?.name}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {screenshotFile ? `${(screenshotFile.size / 1024).toFixed(0)} KB` : ""}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleScreenshotChange(null)}
+                      className="text-xs text-destructive hover:text-destructive h-8 px-2.5"
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="relative border-2 border-dashed border-border/80 hover:border-primary/50 rounded-2xl p-4 text-center cursor-pointer transition bg-card/60">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        handleScreenshotChange(file);
+                      }}
+                      className="absolute inset-0 size-full opacity-0 cursor-pointer"
+                    />
+                    <div className="flex flex-col items-center gap-1.5 py-1">
+                      <Upload className="size-5 text-primary" />
+                      <span className="text-primary font-semibold text-xs">
+                        Click or drag & drop payment screenshot here
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        Proof will be verified by staff before order confirmation
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Optional UPI Ref Input */}
+                <div>
+                  <label htmlFor="upiRef" className="block text-[11px] font-semibold text-foreground mb-1">
+                    UPI Transaction ID / UTR Reference (Optional)
+                  </label>
+                  <input
+                    id="upiRef"
+                    type="text"
+                    className={cn(inputCls, "h-10 text-xs font-mono")}
+                    placeholder="e.g. 12-digit UTR: 428172918291"
+                    value={upiReference}
+                    onChange={(e) => setUpiReference(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* COD Notice */}
+          {f.payment === "cod" && (
+            <div className="mt-5 rounded-2xl border border-border bg-secondary/30 p-4 text-xs space-y-1.5 text-muted-foreground">
+              <div className="flex items-center gap-2 font-semibold text-foreground">
+                <Info className="size-4 text-primary" />
+                <span>Cash on Delivery Guidelines</span>
+              </div>
+              <p>
+                Please keep the exact amount (<strong>{formatINR(total)}</strong>) ready in cash upon arrival. Our delivery coordinator will mark your payment verified upon receiving the cash.
+              </p>
+              {storePaymentSettings.require_first_order_approval && (
+                <p className="text-[11px] text-primary font-medium pt-1">
+                  Note: If this is your first purchase, your order will undergo quick staff review before dispatch.
+                </p>
+              )}
+            </div>
+          )}
+
           {errors.payment && (
             <p className="mt-2 text-xs font-semibold text-destructive">
               {errors.payment}
             </p>
           )}
-
-          {/* Payment Method Transparency Notice */}
-          <div className="mt-4 rounded-xl border border-border/80 bg-secondary/30 p-3 text-xs text-muted-foreground">
-            <p>
-              {f.payment === "upi" || f.payment === "payu"
-                ? "💡 Secure PayU Gateway: You will be redirected to complete payment via UPI, Credit/Debit Card, or Net Banking with 256-bit encryption."
-                : "💡 Cash Notice: Please keep exact change ready for smooth handover at your door."}
-            </p>
-          </div>
         </fieldset>
       </div>
 
@@ -1028,7 +1179,7 @@ export function CheckoutForm() {
         <Button
           type="submit"
           variant="hero"
-          disabled={isSubmitting || unavailableItems.length > 0}
+          disabled={isSubmitting || unavailableItems.length > 0 || !user}
           className="mt-6 h-12 w-full text-base font-bold"
         >
           {isSubmitting ? (
@@ -1038,14 +1189,12 @@ export function CheckoutForm() {
             </>
           ) : unavailableItems.length > 0 ? (
             "Remove Unavailable Items"
+          ) : !user ? (
+            "Sign In to Place Order"
           ) : (
             `Place order · ${formatINR(subtotal)}`
           )}
         </Button>
-
-        <p className="mt-2 text-center text-xs text-muted-foreground">
-          Stock & totals are securely verified on the database.
-        </p>
       </aside>
     </form>
   );

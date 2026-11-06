@@ -48,6 +48,7 @@ import {
   restoreStudentCashPrivileges,
   disputeStudentNoShow,
   loadStudentNoShowRecords,
+  adminSetCustomerBlockStatus,
   DEFAULT_STORE_PAYMENT_SETTINGS,
 } from "@/lib/studentPaymentApi";
 import type { AdminRole } from "@/lib/permissions";
@@ -89,6 +90,12 @@ export function StudentPaymentPoliciesView({
   const [selectedStudentToRestore, setSelectedStudentToRestore] = useState<StudentProfile | null>(null);
   const [restoreReason, setRestoreReason] = useState("");
   const [isRestoringCash, setIsRestoringCash] = useState(false);
+
+  // Customer Block / Restriction state
+  const [selectedStudentForBlock, setSelectedStudentForBlock] = useState<StudentProfile | null>(null);
+  const [blockAction, setBlockAction] = useState<"block" | "unblock">("block");
+  const [blockReason, setBlockReason] = useState("");
+  const [isSubmittingBlock, setIsSubmittingBlock] = useState(false);
 
   // Audit Logs Modal state
   const [auditLogsStudent, setAuditLogsStudent] = useState<StudentProfile | null>(null);
@@ -223,6 +230,65 @@ export function StudentPaymentPoliciesView({
       refreshStudents();
     } catch (err: any) {
       toast.error(err?.message || "Failed to reset policy.");
+    }
+  };
+
+  // Open block / unblock dialog
+  const handleOpenBlockDialog = (student: StudentProfile, action: "block" | "unblock") => {
+    setSelectedStudentForBlock(student);
+    setBlockAction(action);
+    setBlockReason("");
+  };
+
+  // Confirm customer block or unblock
+  const handleConfirmBlockAction = async () => {
+    if (!selectedStudentForBlock) return;
+    if (!canManagePolicies) {
+      toast.error("Access Denied: You do not have permission to block or unblock customers.");
+      return;
+    }
+    if (!blockReason.trim()) {
+      toast.error("A reason is mandatory for restriction audit logs.");
+      return;
+    }
+
+    setIsSubmittingBlock(true);
+    try {
+      const isBlocked = blockAction === "block";
+      const res = await adminSetCustomerBlockStatus(
+        selectedStudentForBlock.id,
+        isBlocked,
+        blockReason.trim()
+      );
+
+      if (!res.success) {
+        toast.error(res.error || `Failed to ${blockAction} customer.`);
+        return;
+      }
+
+      toast.success(
+        `Customer ${selectedStudentForBlock.full_name || "Student"} has been ${isBlocked ? "blocked" : "unblocked"}.`
+      );
+
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.id === selectedStudentForBlock.id
+            ? {
+                ...s,
+                is_blocked: isBlocked,
+                blocked_reason: isBlocked ? blockReason.trim() : null,
+                blocked_at: isBlocked ? new Date().toISOString() : null,
+              }
+            : s
+        )
+      );
+
+      setSelectedStudentForBlock(null);
+      refreshStudents();
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to ${blockAction} customer.`);
+    } finally {
+      setIsSubmittingBlock(false);
     }
   };
 
@@ -510,6 +576,168 @@ export function StudentPaymentPoliciesView({
             </p>
           </div>
         </div>
+
+        {/* Direct UPI & COD Anti-Abuse Settings */}
+        <div className="border-t border-border/60 pt-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-primary" />
+            <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+              Direct UPI Credentials & Campus Anti-Abuse Rules
+            </h4>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* UPI ID */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+              <label className="text-xs font-bold text-foreground block">
+                Store UPI ID (VPA)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. shipzmart@upi"
+                value={storeSettings.upi_id || ""}
+                disabled={!canModifySettings || savingSettings}
+                onChange={(e) =>
+                  setStoreSettings((s) => ({ ...s, upi_id: e.target.value }))
+                }
+                className="h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs font-mono font-medium outline-none focus:border-primary"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Target UPI ID displayed to customers and encoded in dynamic QR codes.
+              </p>
+            </div>
+
+            {/* UPI Payee Name */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+              <label className="text-xs font-bold text-foreground block">
+                UPI Payee Name
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Shipz Mart Campus Store"
+                value={storeSettings.upi_payee_name || ""}
+                disabled={!canModifySettings || savingSettings}
+                onChange={(e) =>
+                  setStoreSettings((s) => ({ ...s, upi_payee_name: e.target.value }))
+                }
+                className="h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs font-medium outline-none focus:border-primary"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Payee name displayed in UPI banking apps upon scanning QR.
+              </p>
+            </div>
+
+            {/* Max Active COD Orders */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Max Active COD Orders</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={storeSettings.max_active_cod_orders ?? 1}
+                  disabled={!canModifySettings || savingSettings}
+                  onChange={(e) =>
+                    setStoreSettings((s) => ({
+                      ...s,
+                      max_active_cod_orders: Math.max(1, parseInt(e.target.value) || 1),
+                    }))
+                  }
+                  className="h-7 w-14 rounded-lg border border-input bg-card px-2 text-center text-xs font-bold"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Maximum concurrent unpaid COD orders a customer can place before fulfillment.
+              </p>
+            </div>
+
+            {/* Max COD Order Amount */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Max COD Amount (₹)</span>
+                <input
+                  type="number"
+                  min={100}
+                  step={100}
+                  value={storeSettings.max_cod_order_amount ?? 1000}
+                  disabled={!canModifySettings || savingSettings}
+                  onChange={(e) =>
+                    setStoreSettings((s) => ({
+                      ...s,
+                      max_cod_order_amount: Math.max(100, parseInt(e.target.value) || 1000),
+                    }))
+                  }
+                  className="h-7 w-20 rounded-lg border border-input bg-card px-2 text-center text-xs font-bold"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Orders exceeding this total amount cannot use COD and must pay via UPI.
+              </p>
+            </div>
+
+            {/* First COD Order Approval */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">First COD Approval</span>
+                <Switch
+                  checked={storeSettings.require_first_order_approval ?? true}
+                  disabled={!canModifySettings || savingSettings}
+                  onCheckedChange={(checked) =>
+                    setStoreSettings((s) => ({ ...s, require_first_order_approval: checked }))
+                  }
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                When enabled, a customer&apos;s first-ever COD order requires staff confirmation before preparation.
+              </p>
+            </div>
+
+            {/* Duplicate Order Throttling Window */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Throttle Window (sec)</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={600}
+                  step={10}
+                  value={storeSettings.duplicate_order_window_seconds ?? 120}
+                  disabled={!canModifySettings || savingSettings}
+                  onChange={(e) =>
+                    setStoreSettings((s) => ({
+                      ...s,
+                      duplicate_order_window_seconds: Math.max(10, parseInt(e.target.value) || 120),
+                    }))
+                  }
+                  className="h-7 w-16 rounded-lg border border-input bg-card px-2 text-center text-xs font-bold"
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Blocks rapid repeated orders with identical totals placed within this time window.
+              </p>
+            </div>
+
+            {/* Optional Custom QR URL */}
+            <div className="rounded-2xl border border-border/80 bg-secondary/30 p-3.5 space-y-1.5 sm:col-span-2">
+              <label className="text-xs font-bold text-foreground block">
+                Static QR Image URL (Optional)
+              </label>
+              <input
+                type="url"
+                placeholder="https://... (leave blank to use dynamic real-time QR)"
+                value={storeSettings.upi_qr_code_url || ""}
+                disabled={!canModifySettings || savingSettings}
+                onChange={(e) =>
+                  setStoreSettings((s) => ({ ...s, upi_qr_code_url: e.target.value || null }))
+                }
+                className="h-8 w-full rounded-lg border border-input bg-card px-2.5 text-xs font-mono outline-none focus:border-primary"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Optional custom static QR image URL. If omitted, the storefront automatically renders a dynamic QR for each exact order amount.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* STUDENT DIRECTORY SEARCH & CONTROLS */}
@@ -602,7 +830,18 @@ export function StudentPaymentPoliciesView({
                     </td>
 
                     <td className="px-4 py-3.5">
-                      {student.cash_restricted ? (
+                      {student.is_blocked ? (
+                        <div className="space-y-0.5">
+                          <Badge variant="destructive" className="text-[10px] bg-destructive/15 text-destructive border-destructive/30">
+                            BLOCKED
+                          </Badge>
+                          {student.blocked_reason && (
+                            <p className="text-[10px] text-destructive truncate max-w-[150px]" title={student.blocked_reason}>
+                              {student.blocked_reason}
+                            </p>
+                          )}
+                        </div>
+                      ) : student.cash_restricted ? (
                         <div className="space-y-0.5">
                           <Badge variant="destructive" className="text-[10px]">
                             Cash Restricted
@@ -618,10 +857,39 @@ export function StudentPaymentPoliciesView({
                           Good Standing
                         </Badge>
                       )}
+                      {(student.cancellation_count ?? 0) > 0 && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {student.cancellation_count} {student.cancellation_count === 1 ? "cancellation" : "cancellations"}
+                        </p>
+                      )}
                     </td>
 
                     <td className="px-4 py-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Block / Unblock account */}
+                        {student.is_blocked ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenBlockDialog(student, "unblock")}
+                            className="h-7 px-2 text-[11px] font-semibold text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 gap-1"
+                            title="Unblock Customer Account"
+                          >
+                            <UserCheck className="size-3" />
+                            <span>Unblock</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleOpenBlockDialog(student, "block")}
+                            className="h-7 px-2 text-[11px] font-semibold text-destructive border-destructive/30 hover:bg-destructive/10 gap-1"
+                            title="Block Customer Account"
+                          >
+                            <UserX className="size-3" />
+                            <span>Block</span>
+                          </Button>
+                        )}
                         {/* Change policy */}
                         <Button
                           variant="outline"
@@ -1043,6 +1311,99 @@ export function StudentPaymentPoliciesView({
               onClick={handleConfirmDispute}
             >
               {isSubmittingDispute ? <Loader2 className="size-3.5 animate-spin" /> : "Confirm Revoke"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BLOCK / UNBLOCK CUSTOMER MODAL */}
+      <Dialog
+        open={Boolean(selectedStudentForBlock)}
+        onOpenChange={(open) => {
+          if (!open && !isSubmittingBlock) setSelectedStudentForBlock(null);
+        }}
+      >
+        <DialogContent className="max-w-md rounded-3xl p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-display text-lg font-bold">
+              {blockAction === "block" ? (
+                <>
+                  <ShieldAlert className="size-5 text-destructive" />
+                  <span>Block Customer Account</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="size-5 text-emerald-600" />
+                  <span>Unblock Customer Account</span>
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {blockAction === "block"
+                ? `Blocking will prevent ${selectedStudentForBlock?.full_name || "this customer"} from placing any new orders. All actions are logged to the restriction audit trail.`
+                : `Restoring account access for ${selectedStudentForBlock?.full_name || "this customer"} will allow them to place orders again.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-2 text-xs">
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 space-y-1">
+              <p className="font-semibold text-foreground">
+                Customer: {selectedStudentForBlock?.full_name || "Unknown"}
+              </p>
+              <p className="text-muted-foreground">
+                Phone: {selectedStudentForBlock?.phone || "No phone registered"}
+              </p>
+              <p className="text-muted-foreground">
+                Recorded Cancellations: {selectedStudentForBlock?.cancellation_count ?? 0}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-foreground flex items-center justify-between">
+                <span>Reason for {blockAction === "block" ? "Restriction" : "Restoration"} *</span>
+                <span className="text-[10px] text-muted-foreground">Mandatory for audit trail</span>
+              </label>
+              <textarea
+                rows={3}
+                value={blockReason}
+                onChange={(e) => setBlockReason(e.target.value)}
+                placeholder={
+                  blockAction === "block"
+                    ? "e.g. Repeated fraudulent orders, fake UPI screenshots submitted"
+                    : "e.g. Identity verified in person at campus store, misunderstanding resolved"
+                }
+                className="w-full rounded-xl border border-input bg-card p-2.5 text-xs outline-none focus:border-primary resize-none"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isSubmittingBlock}
+              onClick={() => setSelectedStudentForBlock(null)}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant={blockAction === "block" ? "destructive" : "hero"}
+              size="sm"
+              disabled={isSubmittingBlock || !blockReason.trim()}
+              onClick={handleConfirmBlockAction}
+              className="text-xs font-bold gap-1.5"
+            >
+              {isSubmittingBlock ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : blockAction === "block" ? (
+                <UserX className="size-3.5" />
+              ) : (
+                <UserCheck className="size-3.5" />
+              )}
+              <span>{blockAction === "block" ? "Block Customer" : "Restore Access"}</span>
             </Button>
           </DialogFooter>
         </DialogContent>

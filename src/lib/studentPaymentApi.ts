@@ -5,6 +5,7 @@ import type {
   StudentPaymentAuditLog,
   StudentNoShowRecord,
   StorePaymentSettings,
+  CustomerRestrictionAuditLog,
 } from "@/lib/types";
 import { createAdminNotification } from "@/lib/notifications";
 
@@ -13,6 +14,13 @@ export const DEFAULT_STORE_PAYMENT_SETTINGS: StorePaymentSettings = {
   online_payment_enabled: true,
   guest_cash_allowed: true,
   max_cash_no_shows_threshold: 2,
+  upi_id: "9605174298@upi",
+  upi_payee_name: "Shipt Mart",
+  upi_qr_code_url: null,
+  max_active_cod_orders: 1,
+  max_cod_order_amount: 500.0,
+  require_first_order_approval: true,
+  duplicate_order_window_seconds: 120,
 };
 
 export interface ResolvedPaymentEligibility {
@@ -21,6 +29,8 @@ export interface ResolvedPaymentEligibility {
   cashReason?: string | undefined;
   onlineReason?: string | undefined;
   policy: StudentPaymentPolicy;
+  isBlocked?: boolean;
+  blockedReason?: string | undefined;
 }
 
 /**
@@ -33,12 +43,30 @@ export function resolveStudentPaymentPolicy(
 ): ResolvedPaymentEligibility {
   const policy: StudentPaymentPolicy = profile?.payment_policy || "default";
   const isCashRestricted = !!profile?.cash_restricted;
+  const isBlocked = !!profile?.is_blocked;
+  const blockedReason = profile?.blocked_reason || undefined;
 
   let cashAllowed = settings.cash_payment_enabled;
   let cashReason: string | undefined;
 
   let onlineAllowed = settings.online_payment_enabled;
   let onlineReason: string | undefined;
+
+  if (isBlocked) {
+    cashAllowed = false;
+    onlineAllowed = false;
+    cashReason = blockedReason || "Your account has been restricted from placing orders.";
+    onlineReason = blockedReason || "Your account has been restricted from placing orders.";
+    return {
+      cashAllowed: false,
+      onlineAllowed: false,
+      cashReason,
+      onlineReason,
+      policy,
+      isBlocked: true,
+      blockedReason,
+    };
+  }
 
   if (!settings.cash_payment_enabled) {
     cashAllowed = false;
@@ -50,7 +78,7 @@ export function resolveStudentPaymentPolicy(
     }
   } else if (policy === "online_only") {
     cashAllowed = false;
-    cashReason = "Online payment is required for your account.";
+    cashReason = "Online payment is required for your account (Direct UPI).";
   } else if (isCashRestricted) {
     cashAllowed = false;
     cashReason = profile?.cash_restriction_reason || "Cash orders restricted due to uncollected orders.";
@@ -70,6 +98,7 @@ export function resolveStudentPaymentPolicy(
     cashReason,
     onlineReason,
     policy,
+    isBlocked: false,
   };
 }
 
@@ -84,7 +113,7 @@ export async function loadStorePaymentSettings(): Promise<StorePaymentSettings> 
   try {
     const { data, error } = await supabase
       .from("store_settings")
-      .select("cash_payment_enabled, online_payment_enabled, guest_cash_allowed, max_cash_no_shows_threshold")
+      .select("cash_payment_enabled, online_payment_enabled, guest_cash_allowed, max_cash_no_shows_threshold, upi_id, upi_payee_name, upi_qr_code_url, max_active_cod_orders, max_cod_order_amount, require_first_order_approval, duplicate_order_window_seconds")
       .eq("id", "default")
       .maybeSingle();
 
@@ -97,6 +126,13 @@ export async function loadStorePaymentSettings(): Promise<StorePaymentSettings> 
       online_payment_enabled: data.online_payment_enabled ?? true,
       guest_cash_allowed: data.guest_cash_allowed ?? true,
       max_cash_no_shows_threshold: data.max_cash_no_shows_threshold ?? 2,
+      upi_id: data.upi_id || "9605174298@upi",
+      upi_payee_name: data.upi_payee_name || "Shipt Mart",
+      upi_qr_code_url: data.upi_qr_code_url ?? null,
+      max_active_cod_orders: data.max_active_cod_orders ?? 1,
+      max_cod_order_amount: Number(data.max_cod_order_amount ?? 500),
+      require_first_order_approval: data.require_first_order_approval ?? true,
+      duplicate_order_window_seconds: data.duplicate_order_window_seconds ?? 120,
     };
   } catch {
     return DEFAULT_STORE_PAYMENT_SETTINGS;
@@ -119,6 +155,13 @@ export async function updateStorePaymentSettings(
       p_online_enabled: settings.online_payment_enabled,
       p_guest_cash_allowed: settings.guest_cash_allowed,
       p_threshold: settings.max_cash_no_shows_threshold,
+      p_upi_id: settings.upi_id || "9605174298@upi",
+      p_upi_payee_name: settings.upi_payee_name || "Shipt Mart",
+      p_upi_qr_code_url: settings.upi_qr_code_url || null,
+      p_max_active_cod: settings.max_active_cod_orders ?? 1,
+      p_max_cod_amount: settings.max_cod_order_amount ?? 500,
+      p_require_first_approval: settings.require_first_order_approval ?? true,
+      p_dup_window_secs: settings.duplicate_order_window_seconds ?? 120,
     });
 
     if (error) {
@@ -152,6 +195,11 @@ export async function loadStudentProfiles(searchQuery?: string): Promise<Student
         cash_restricted,
         cash_restriction_reason,
         cash_restricted_at,
+        cancellation_count,
+        is_blocked,
+        blocked_reason,
+        blocked_at,
+        blocked_by,
         default_hostel,
         default_block,
         default_room,
@@ -181,6 +229,11 @@ export async function loadStudentProfiles(searchQuery?: string): Promise<Student
       cash_restricted: !!d.cash_restricted,
       cash_restriction_reason: d.cash_restriction_reason,
       cash_restricted_at: d.cash_restricted_at,
+      cancellation_count: d.cancellation_count || 0,
+      is_blocked: !!d.is_blocked,
+      blocked_reason: d.blocked_reason,
+      blocked_at: d.blocked_at,
+      blocked_by: d.blocked_by,
       default_hostel: d.default_hostel,
       default_block: d.default_block,
       default_room: d.default_room,
@@ -219,6 +272,154 @@ export async function updateStudentPaymentPolicy(
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || "Failed to update payment policy." };
+  }
+}
+
+/**
+ * Blocks or unblocks a customer with mandatory audit logging
+ */
+export async function adminSetCustomerBlockStatus(
+  customerId: string,
+  isBlocked: boolean,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: true };
+  }
+
+  try {
+    const { error } = await supabase.rpc("admin_set_customer_block_status", {
+      p_customer_id: customerId,
+      p_is_blocked: isBlocked,
+      p_reason: reason.trim(),
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to update block status." };
+  }
+}
+
+/**
+ * Loads customer restriction audit logs
+ */
+export async function loadCustomerRestrictionAuditLogs(
+  customerId?: string
+): Promise<CustomerRestrictionAuditLog[]> {
+  if (!isSupabaseConfigured) {
+    return [];
+  }
+
+  try {
+    let query = supabase
+      .from("customer_restriction_audit_logs")
+      .select("id, customer_id, action, reason, changed_by, metadata, created_at")
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (customerId) {
+      query = query.eq("customer_id", customerId);
+    }
+
+    const { data, error } = await query;
+    if (error || !data) {
+      return [];
+    }
+
+    return data as CustomerRestrictionAuditLog[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Submits Direct UPI payment proof (screenshot path + optional reference)
+ */
+export async function submitOrderPaymentProof(
+  orderId: string,
+  screenshotPath: string,
+  upiRef?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: true };
+  }
+
+  try {
+    const { error } = await supabase.rpc("submit_order_payment_proof", {
+      p_order_id: orderId,
+      p_screenshot_path: screenshotPath.trim(),
+      p_upi_ref: upiRef?.trim() || null,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to submit payment proof." };
+  }
+}
+
+/**
+ * Approves a first-time COD order
+ */
+export async function adminApproveFirstTimeCOD(
+  orderId: string,
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: true };
+  }
+
+  try {
+    const { error } = await supabase.rpc("admin_approve_first_time_cod", {
+      p_order_id: orderId,
+      p_notes: notes?.trim() || null,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to approve COD order." };
+  }
+}
+
+/**
+ * Admin verifies or rejects a payment against the actual bank ledger
+ */
+export async function adminVerifyPayment(
+  paymentId: string,
+  status: "paid" | "failed",
+  upiRef?: string,
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return { success: true };
+  }
+
+  try {
+    const { error } = await supabase.rpc("admin_verify_payment", {
+      p_payment_id: paymentId,
+      p_status: status,
+      p_upi_ref: upiRef?.trim() || null,
+      p_notes: notes?.trim() || null,
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to verify payment." };
   }
 }
 

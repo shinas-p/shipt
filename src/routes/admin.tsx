@@ -52,6 +52,8 @@ import {
   ArrowLeft,
   SlidersHorizontal,
   Share2,
+  Smartphone,
+  QrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,7 +78,8 @@ import { PushNotificationSettingsView } from "@/components/admin/PushNotificatio
 import { StudentPaymentPoliciesView } from "@/components/admin/StudentPaymentPoliciesView";
 import { createAdminNotification } from "@/lib/notifications";
 import { adminManageRefund } from "@/lib/payuApi";
-import type { AdminOrderStatusTab } from "@/lib/types";
+import type { AdminOrderStatusTab, AdminPaymentRecord } from "@/lib/types";
+import { adminVerifyPayment, adminApproveFirstTimeCOD } from "@/lib/studentPaymentApi";
 import { SettingsDashboardTab, type SettingsSubView } from "@/components/admin/SettingsDashboardTab";
 import { TabVisibilitySettingsView } from "@/components/admin/TabVisibilitySettingsView";
 import { TabVisibilitySettingsSection } from "@/components/admin/TabVisibilitySettingsSection";
@@ -192,6 +195,8 @@ interface AdminOrder {
   payment_status: string;
   payu_txnid?: string | null;
   payu_mihpayid?: string | null;
+  is_first_order?: boolean | null;
+  approval_notes?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   processing_started_at?: string | null;
@@ -201,6 +206,7 @@ interface AdminOrder {
   updated_at?: string;
   order_items?: AdminOrderItem[];
   order_status_history?: AdminOrderStatusHistory[];
+  payments?: AdminPaymentRecord[];
 }
 
 interface AdminBanner {
@@ -351,6 +357,10 @@ function AdminPortalInner() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string>("");
   const [copiedRef, setCopiedRef] = useState(false);
+  const [screenshotSignedUrl, setScreenshotSignedUrl] = useState<string | null>(null);
+  const [isLoadingScreenshot, setIsLoadingScreenshot] = useState(false);
+  const [isVerifyingProof, setIsVerifyingProof] = useState(false);
+  const [isApprovingFirstCOD, setIsApprovingFirstCOD] = useState(false);
 
   // Products, Categories & Stock state
   const [dbProducts, setDbProducts] = useState<DBProduct[]>([]);
@@ -466,6 +476,8 @@ function AdminPortalInner() {
   // Dynamic order counts per status tab matching active sector filter
   const tabCounts = useMemo(() => {
     let all = 0;
+    let verification_pending = 0;
+    let awaiting_approval = 0;
     let pending = 0;
     let processing = 0;
     let completed = 0;
@@ -474,6 +486,15 @@ function AdminPortalInner() {
     for (const o of sectorScopedOrders) {
       all++;
       const s = o.status.toLowerCase();
+      const ps = (o.payment_status || "").toLowerCase();
+
+      if (ps === "verification_pending" || s === "awaiting_payment") {
+        verification_pending++;
+      }
+      if (s === "awaiting_approval") {
+        awaiting_approval++;
+      }
+
       if (s === "placed" || s === "confirmed") {
         pending++;
       } else if (s === "preparing" || s === "out_for_delivery" || s === "ready_for_pickup") {
@@ -485,15 +506,20 @@ function AdminPortalInner() {
       }
     }
 
-    return { all, pending, processing, completed, cancelled };
+    return { all, verification_pending, awaiting_approval, pending, processing, completed, cancelled };
   }, [sectorScopedOrders]);
 
   const filteredOrders = useMemo(() => {
     return sectorScopedOrders.filter((o) => {
       const s = o.status.toLowerCase();
+      const ps = (o.payment_status || "").toLowerCase();
 
-      // 1. Status Tab Filter (Pending, Processing, Completed, Cancelled, All)
-      if (orderStatusTab === "pending") {
+      // 1. Status Tab Filter (Verification Pending, Awaiting Approval, Pending, Processing, Completed, Cancelled, All)
+      if (orderStatusTab === "verification_pending") {
+        if (ps !== "verification_pending" && s !== "awaiting_payment") return false;
+      } else if (orderStatusTab === "awaiting_approval") {
+        if (s !== "awaiting_approval") return false;
+      } else if (orderStatusTab === "pending") {
         if (s !== "placed" && s !== "confirmed") return false;
       } else if (orderStatusTab === "processing") {
         if (s !== "preparing" && s !== "out_for_delivery" && s !== "ready_for_pickup") return false;
@@ -515,7 +541,10 @@ function AdminPortalInner() {
     const match = orders.find((o) => o.id === orderId || (orderNumber && o.order_number === orderNumber));
     if (match) {
       const s = match.status.toLowerCase();
-      if (s === "placed" || s === "confirmed") setOrderStatusTab("pending");
+      const ps = (match.payment_status || "").toLowerCase();
+      if (ps === "verification_pending" || s === "awaiting_payment") setOrderStatusTab("verification_pending");
+      else if (s === "awaiting_approval") setOrderStatusTab("awaiting_approval");
+      else if (s === "placed" || s === "confirmed") setOrderStatusTab("pending");
       else if (s === "preparing" || s === "out_for_delivery" || s === "ready_for_pickup") setOrderStatusTab("processing");
       else if (s === "completed") setOrderStatusTab("completed");
       else if (s === "cancelled") setOrderStatusTab("cancelled");
@@ -523,6 +552,57 @@ function AdminPortalInner() {
       setSelectedAdminOrder(match);
     }
   }, [orders]);
+
+  const activeOrderPayment = useMemo(() => {
+    return selectedAdminOrder?.payments?.[0] || null;
+  }, [selectedAdminOrder]);
+
+  const duplicateUpiOrder = useMemo(() => {
+    if (!selectedAdminOrder || !activeOrderPayment?.upi_reference_number) return null;
+    const currentRef = activeOrderPayment.upi_reference_number.trim().toLowerCase();
+    if (!currentRef) return null;
+    return orders.find(
+      (o) =>
+        o.id !== selectedAdminOrder.id &&
+        o.payments?.some(
+          (p) => p.upi_reference_number && p.upi_reference_number.trim().toLowerCase() === currentRef
+        )
+    );
+  }, [selectedAdminOrder, activeOrderPayment, orders]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const path = activeOrderPayment?.screenshot_path;
+    if (!path) {
+      setScreenshotSignedUrl(null);
+      setIsLoadingScreenshot(false);
+      return;
+    }
+    setIsLoadingScreenshot(true);
+    supabase.storage
+      .from("payment-screenshots")
+      .createSignedUrl(path, 600)
+      .then(({ data, error }) => {
+        if (isMounted) {
+          if (!error && data?.signedUrl) {
+            setScreenshotSignedUrl(data.signedUrl);
+          } else {
+            setScreenshotSignedUrl(null);
+          }
+          setIsLoadingScreenshot(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setScreenshotSignedUrl(null);
+          setIsLoadingScreenshot(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeOrderPayment?.screenshot_path]);
 
   const filteredProducts = useMemo(() => {
     return dbProducts.filter((p) => {
@@ -704,6 +784,10 @@ function AdminPortalInner() {
           total_amount,
           payment_method,
           payment_status,
+          payu_txnid,
+          payu_mihpayid,
+          is_first_order,
+          approval_notes,
           claimed_by,
           claimed_at,
           processing_started_at,
@@ -725,6 +809,22 @@ function AdminPortalInner() {
             id,
             previous_status,
             new_status,
+            notes,
+            created_at
+          ),
+          payments(
+            id,
+            order_id,
+            payment_method,
+            amount,
+            status,
+            upi_reference_number,
+            screenshot_path,
+            screenshot_uploaded_at,
+            verification_notes,
+            rejection_reason,
+            verified_by,
+            verified_at,
             notes,
             created_at
           )
@@ -788,6 +888,9 @@ function AdminPortalInner() {
           processing_started_at: raw.processing_started_at ?? null,
           completed_at: raw.completed_at ?? null,
           cancelled_at: raw.cancelled_at ?? null,
+          is_first_order: raw.is_first_order ?? null,
+          approval_notes: raw.approval_notes ?? null,
+          payments: raw.payments ?? [],
         })) as AdminOrder[];
         setOrders(typedOrders);
         return typedOrders;
@@ -2061,6 +2164,62 @@ function AdminPortalInner() {
             <button
               type="button"
               role="tab"
+              aria-selected={orderStatusTab === "verification_pending"}
+              onClick={() => {
+                setOrderStatusTab("verification_pending");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "verification_pending"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Verify UPI</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "verification_pending"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                )}
+              >
+                {tabCounts.verification_pending}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={orderStatusTab === "awaiting_approval"}
+              onClick={() => {
+                setOrderStatusTab("awaiting_approval");
+                setOrderFilter("all");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition",
+                orderStatusTab === "awaiting_approval"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              )}
+            >
+              <span>Approve COD</span>
+              <span
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-[10px] font-extrabold",
+                  orderStatusTab === "awaiting_approval"
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : "bg-purple-500/15 text-purple-700 dark:text-purple-400"
+                )}
+              >
+                {tabCounts.awaiting_approval}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
               aria-selected={orderStatusTab === "pending"}
               onClick={() => {
                 setOrderStatusTab("pending");
@@ -2180,6 +2339,8 @@ function AdminPortalInner() {
                 className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs font-medium outline-none"
               >
                 <option value="all">All in this tab</option>
+                <option value="awaiting_payment">Awaiting Payment</option>
+                <option value="awaiting_approval">Awaiting Approval</option>
                 <option value="placed">Placed</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="preparing">Preparing</option>
@@ -2236,26 +2397,34 @@ function AdminPortalInner() {
             <div className="rounded-3xl border border-dashed border-border bg-card p-12 text-center space-y-2">
               <Package className="mx-auto size-10 text-muted-foreground/40" />
               <h3 className="font-display text-base font-bold text-foreground">
-                {orderStatusTab === "pending"
-                  ? "No Pending Orders"
-                  : orderStatusTab === "processing"
-                    ? "No Orders in Processing"
-                    : orderStatusTab === "completed"
-                      ? "No Completed Orders"
-                      : orderStatusTab === "cancelled"
-                        ? "No Cancelled Orders"
-                        : "No Orders Found"}
+                {orderStatusTab === "verification_pending"
+                  ? "No Proofs Awaiting Verification"
+                  : orderStatusTab === "awaiting_approval"
+                    ? "No COD Orders Awaiting Approval"
+                    : orderStatusTab === "pending"
+                      ? "No Pending Orders"
+                      : orderStatusTab === "processing"
+                        ? "No Orders in Processing"
+                        : orderStatusTab === "completed"
+                          ? "No Completed Orders"
+                          : orderStatusTab === "cancelled"
+                            ? "No Cancelled Orders"
+                            : "No Orders Found"}
               </h3>
               <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                {orderStatusTab === "pending"
-                  ? "There are currently no placed or confirmed orders awaiting fulfillment."
-                  : orderStatusTab === "processing"
-                    ? "No orders are currently being prepared or out for delivery."
-                    : orderStatusTab === "completed"
-                      ? "Successfully delivered and collected orders will appear here."
-                      : orderStatusTab === "cancelled"
-                        ? "Cancelled customer orders with restored inventory will be recorded here."
-                        : "No orders match the selected filters."}
+                {orderStatusTab === "verification_pending"
+                  ? "No UPI payment proofs are currently awaiting manual verification."
+                  : orderStatusTab === "awaiting_approval"
+                    ? "No first-time COD orders are awaiting staff approval."
+                    : orderStatusTab === "pending"
+                      ? "There are currently no placed or confirmed orders awaiting fulfillment."
+                      : orderStatusTab === "processing"
+                        ? "No orders are currently being prepared or out for delivery."
+                        : orderStatusTab === "completed"
+                          ? "Successfully delivered and collected orders will appear here."
+                          : orderStatusTab === "cancelled"
+                            ? "Cancelled customer orders with restored inventory will be recorded here."
+                            : "No orders match the selected filters."}
               </p>
             </div>
           ) : (
@@ -2276,11 +2445,25 @@ function AdminPortalInner() {
                               ? "bg-primary/10 text-primary border border-primary/20"
                               : ord.status === "cancelled"
                                 ? "bg-destructive/10 text-destructive border border-destructive/20"
-                                : "bg-warn/15 text-warn-foreground border border-warn/30"
+                                : ord.status === "awaiting_approval"
+                                  ? "bg-purple-500/15 text-purple-700 border border-purple-500/30"
+                                  : ord.status === "awaiting_payment"
+                                    ? "bg-amber-500/15 text-amber-700 border border-amber-500/30"
+                                    : "bg-warn/15 text-warn-foreground border border-warn/30"
                           )}
                         >
                           {ord.status.replace(/_/g, " ")}
                         </span>
+                        {ord.is_first_order && (
+                          <Badge variant="outline" className="text-[10px] font-bold bg-indigo-500/10 text-indigo-700 border-indigo-500/30">
+                            First COD Order
+                          </Badge>
+                        )}
+                        {ord.payment_status === "verification_pending" && (
+                          <Badge variant="outline" className="text-[10px] font-bold bg-amber-500/15 text-amber-700 border-amber-500/30">
+                            Proof Pending
+                          </Badge>
+                        )}
                         <Badge variant="outline" className="text-[10px] text-muted-foreground">
                           {ord.user_id ? "Registered" : "Guest"}
                         </Badge>
@@ -2421,6 +2604,12 @@ function AdminPortalInner() {
                         onChange={(e) => updateOrderStatus(ord.id, e.target.value)}
                         className="h-8 rounded-lg border border-input bg-card px-2.5 text-xs font-semibold outline-none focus:border-primary"
                       >
+                        {ord.status === "awaiting_payment" && (
+                          <option value="awaiting_payment">Awaiting Payment</option>
+                        )}
+                        {ord.status === "awaiting_approval" && (
+                          <option value="awaiting_approval">Awaiting Approval</option>
+                        )}
                         <option value="placed">Placed</option>
                         <option value="confirmed">Confirmed</option>
                         <option value="preparing">Preparing</option>
@@ -2713,6 +2902,303 @@ function AdminPortalInner() {
                     )}
                   </div>
 
+                  {/* First-Time COD Customer Verification Banner & Actions */}
+                  {selectedAdminOrder.status === "awaiting_approval" && (
+                    <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4 space-y-3">
+                      <div className="flex items-center gap-2 text-purple-800 dark:text-purple-300">
+                        <ShieldAlert className="size-4 shrink-0" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider">First-Time COD Customer Verification</h4>
+                      </div>
+                      <p className="text-xs text-purple-700 dark:text-purple-400">
+                        This is this customer&apos;s first Cash on Delivery order. Campus anti-abuse rules require staff confirmation before preparing.
+                        {selectedAdminOrder.approval_notes && (
+                          <span className="block mt-1 font-mono text-[11px] text-purple-800 dark:text-purple-300">
+                            Notes: {selectedAdminOrder.approval_notes}
+                          </span>
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="hero"
+                          disabled={isApprovingFirstCOD}
+                          className="h-8 text-xs font-semibold gap-1.5"
+                          onClick={async () => {
+                            setIsApprovingFirstCOD(true);
+                            try {
+                              const res = await adminApproveFirstTimeCOD(selectedAdminOrder.id, "Approved by staff");
+                              if (res.success) {
+                                toast.success("First-time COD order approved and confirmed.");
+                                const freshOrders = await loadOrders();
+                                if (freshOrders) {
+                                  const fresh = freshOrders.find((o) => o.id === selectedAdminOrder.id);
+                                  if (fresh) setSelectedAdminOrder(fresh);
+                                }
+                              } else {
+                                toast.error(res.error || "Failed to approve COD order.");
+                              }
+                            } finally {
+                              setIsApprovingFirstCOD(false);
+                            }
+                          }}
+                        >
+                          {isApprovingFirstCOD ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Check className="size-3.5" />
+                          )}
+                          <span>Approve COD Order</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isApprovingFirstCOD}
+                          className="h-8 text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/10"
+                          onClick={() => {
+                            updateOrderStatus(selectedAdminOrder.id, "cancelled", "First-time COD order declined by staff.");
+                          }}
+                        >
+                          <X className="size-3.5" />
+                          <span>Decline & Cancel Order</span>
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Direct UPI Payment Proof & Verification Card */}
+                  {selectedAdminOrder.payment_method === "upi" && (
+                    <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/50 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="size-4 text-primary" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Direct UPI Payment Proof</h4>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] font-semibold capitalize",
+                            selectedAdminOrder.payment_status === "paid"
+                              ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30"
+                              : selectedAdminOrder.payment_status === "verification_pending"
+                                ? "bg-amber-500/10 text-amber-700 border-amber-500/30"
+                                : "bg-secondary text-muted-foreground"
+                          )}
+                        >
+                          {selectedAdminOrder.payment_status.replace(/_/g, " ")}
+                        </Badge>
+                      </div>
+
+                      {duplicateUpiOrder && (
+                        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-start gap-2">
+                          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="font-bold">Duplicate Reference Warning:</strong> Reference{" "}
+                            <span className="font-mono font-bold underline">{activeOrderPayment?.upi_reference_number}</span> was also submitted for Order #{duplicateUpiOrder.order_number}! Verify with bank ledger carefully.
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="text-muted-foreground block text-[11px]">UPI Reference / UTR:</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <strong className="font-mono text-xs text-foreground">
+                              {activeOrderPayment?.upi_reference_number || "Not provided by customer"}
+                            </strong>
+                            {activeOrderPayment?.upi_reference_number && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(activeOrderPayment.upi_reference_number || "");
+                                  toast.success("UTR reference copied to clipboard");
+                                }}
+                                className="text-muted-foreground hover:text-foreground"
+                                title="Copy Reference"
+                              >
+                                <Copy className="size-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className="text-muted-foreground block text-[11px]">Screenshot Uploaded:</span>
+                          <span className="text-foreground text-xs mt-0.5 block">
+                            {activeOrderPayment?.screenshot_uploaded_at
+                              ? new Date(activeOrderPayment.screenshot_uploaded_at).toLocaleString()
+                              : "No timestamp recorded"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {activeOrderPayment?.screenshot_path ? (
+                        <div className="space-y-2 pt-1">
+                          <span className="text-[11px] font-semibold text-muted-foreground">Payment Screenshot:</span>
+                          {isLoadingScreenshot ? (
+                            <div className="flex items-center justify-center p-6 border rounded-xl bg-secondary/20">
+                              <Loader2 className="size-5 animate-spin text-primary" />
+                              <span className="ml-2 text-xs text-muted-foreground">Generating secure signed preview...</span>
+                            </div>
+                          ) : screenshotSignedUrl ? (
+                            <div className="rounded-xl overflow-hidden border border-border bg-black/5 max-w-sm space-y-2 p-2">
+                              <img
+                                src={screenshotSignedUrl}
+                                alt="Payment Proof"
+                                className="w-full max-h-64 object-contain rounded-lg"
+                              />
+                              <div className="flex items-center justify-between px-1">
+                                <a
+                                  href={screenshotSignedUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1"
+                                >
+                                  <ExternalLink className="size-3" />
+                                  <span>Open Full Size Proof</span>
+                                </a>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+                              Could not load payment screenshot. The file link may have expired.
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-dashed border-border p-3 text-xs text-muted-foreground text-center">
+                          No payment screenshot uploaded.
+                        </div>
+                      )}
+
+                      {(selectedAdminOrder.payment_status === "verification_pending" ||
+                        selectedAdminOrder.status === "awaiting_payment") &&
+                        activeOrderPayment?.id && (
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-border/50">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="hero"
+                              disabled={isVerifyingProof}
+                              className="h-8 text-xs font-semibold gap-1.5"
+                              onClick={async () => {
+                                setIsVerifyingProof(true);
+                                try {
+                                  const res = await adminVerifyPayment(
+                                    activeOrderPayment.id,
+                                    "paid",
+                                    activeOrderPayment.upi_reference_number || undefined,
+                                    "Payment verified against bank ledger by staff"
+                                  );
+                                  if (res.success) {
+                                    toast.success("Payment verified! Order confirmed.");
+                                    const freshOrders = await loadOrders();
+                                    if (freshOrders) {
+                                      const fresh = freshOrders.find((o) => o.id === selectedAdminOrder.id);
+                                      if (fresh) setSelectedAdminOrder(fresh);
+                                    }
+                                  } else {
+                                    toast.error(res.error || "Failed to verify payment.");
+                                  }
+                                } finally {
+                                  setIsVerifyingProof(false);
+                                }
+                              }}
+                            >
+                              {isVerifyingProof ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Check className="size-3.5" />
+                              )}
+                              <span>Verify Payment & Confirm Order</span>
+                            </Button>
+
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={isVerifyingProof}
+                              className="h-8 text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={async () => {
+                                const reason = window.prompt("Enter rejection reason for customer (e.g. Invalid UTR, transaction not found in bank ledger):");
+                                if (!reason) return;
+                                setIsVerifyingProof(true);
+                                try {
+                                  const res = await adminVerifyPayment(
+                                    activeOrderPayment.id,
+                                    "failed",
+                                    undefined,
+                                    reason
+                                  );
+                                  if (res.success) {
+                                    toast.info("Payment proof marked as rejected.");
+                                    const freshOrders = await loadOrders();
+                                    if (freshOrders) {
+                                      const fresh = freshOrders.find((o) => o.id === selectedAdminOrder.id);
+                                      if (fresh) setSelectedAdminOrder(fresh);
+                                    }
+                                  } else {
+                                    toast.error(res.error || "Failed to reject payment proof.");
+                                  }
+                                } finally {
+                                  setIsVerifyingProof(false);
+                                }
+                              }}
+                            >
+                              <X className="size-3.5" />
+                              <span>Reject Proof</span>
+                            </Button>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {/* COD Cash Collection Action */}
+                  {selectedAdminOrder.payment_method === "cod" &&
+                    selectedAdminOrder.payment_status !== "paid" &&
+                    activeOrderPayment?.id && (
+                      <div className="flex items-center justify-between rounded-xl border border-border bg-secondary/30 p-3">
+                        <div className="text-xs">
+                          <span className="font-semibold text-foreground">Cash Collection:</span>
+                          <p className="text-[11px] text-muted-foreground">Mark payment received once physical cash is handed over.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={isVerifyingProof}
+                          className="h-8 text-xs font-semibold gap-1.5"
+                          onClick={async () => {
+                            setIsVerifyingProof(true);
+                            try {
+                              const res = await adminVerifyPayment(
+                                activeOrderPayment.id,
+                                "paid",
+                                undefined,
+                                "Physical cash collected upon delivery"
+                              );
+                              if (res.success) {
+                                toast.success("Cash payment recorded as received.");
+                                const freshOrders = await loadOrders();
+                                if (freshOrders) {
+                                  const fresh = freshOrders.find((o) => o.id === selectedAdminOrder.id);
+                                  if (fresh) setSelectedAdminOrder(fresh);
+                                }
+                              } else {
+                                toast.error(res.error || "Failed to record cash payment.");
+                              }
+                            } finally {
+                              setIsVerifyingProof(false);
+                            }
+                          }}
+                        >
+                          <CheckCircle2 className="size-3.5 text-emerald-600" />
+                          <span>Mark Cash Received</span>
+                        </Button>
+                      </div>
+                    )}
+
                   {/* Refund Review Banner & Actions */}
                   {selectedAdminOrder.payment_status === "refund_pending" && (
                     <div className="rounded-2xl border border-orange-500/30 bg-orange-500/10 p-4 space-y-3">
@@ -2849,6 +3335,12 @@ function AdminPortalInner() {
                               disabled={isUpdatingStatus}
                               className="h-10 w-full rounded-xl border border-input bg-card px-3 text-xs font-semibold outline-none focus:border-primary"
                             >
+                              {selectedAdminOrder.status === "awaiting_payment" && (
+                                <option value="awaiting_payment">Awaiting Payment</option>
+                              )}
+                              {selectedAdminOrder.status === "awaiting_approval" && (
+                                <option value="awaiting_approval">Awaiting Approval</option>
+                              )}
                               <option value="placed">Placed</option>
                               <option value="confirmed">Confirmed</option>
                               <option value="preparing">Preparing</option>

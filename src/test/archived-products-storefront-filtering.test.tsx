@@ -13,8 +13,19 @@ import type { DBProduct, DBCategory } from "@/components/admin/products/types";
 // Mock customer auth
 vi.mock("@/lib/auth", () => ({
   useCustomerAuth: () => ({
-    user: null,
-    profile: null,
+    user: { id: "test-user-id", email: "aarav@campus.edu" },
+    profile: {
+      id: "test-user-id",
+      full_name: "Aarav Sharma",
+      phone: "9876543210",
+      default_hostel: "Hostel 1",
+      default_block: "Block A",
+      default_room: "B-204",
+      payment_policy: "default",
+      cash_restricted: false,
+      is_blocked: false,
+      cancellation_count: 0,
+    },
     isLoading: false,
   }),
 }));

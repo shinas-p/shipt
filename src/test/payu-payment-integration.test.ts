@@ -2935,4 +2935,274 @@ describe("Part A: PayU Payment Gateway Integration Test Suite", () => {
       expect(allowedMovementTypes.length).toBe(8);
     });
   });
+
+  describe("14. Guest Checkout Authorization & Token Propagation Suite", () => {
+    // Model simulating Edge Function initiation and verification authorization logic
+    function evaluateOrderAuthorization(params: {
+      order: {
+        id: string;
+        user_id?: string | null;
+        guest_tracking_token?: string | null;
+        payu_txnid?: string | null;
+      };
+      callerAuthUser?: { id: string; role?: string } | null;
+      bearerToken?: string | null;
+      serviceRoleKey?: string;
+      providedGuestToken?: string | null;
+      providedTxnId?: string | null;
+    }) {
+      const {
+        order,
+        callerAuthUser,
+        bearerToken,
+        serviceRoleKey = "mock_service_role_key_secret",
+        providedGuestToken,
+        providedTxnId,
+      } = params;
+
+      // 1. Service-role backend caller
+      if (bearerToken && bearerToken === serviceRoleKey) {
+        return { authorized: true, reason: "service_role" };
+      }
+
+      // 2. Authenticated user who owns the order or admin
+      if (callerAuthUser) {
+        if (order.user_id && callerAuthUser.id === order.user_id) {
+          return { authorized: true, reason: "order_owner" };
+        }
+        if (callerAuthUser.role === "admin" || callerAuthUser.role === "super_admin") {
+          return { authorized: true, reason: "admin" };
+        }
+      }
+
+      // 3. Guest with authentic guest_tracking_token matching the order
+      if (
+        order.guest_tracking_token &&
+        providedGuestToken &&
+        providedGuestToken === order.guest_tracking_token
+      ) {
+        return { authorized: true, reason: "valid_guest_token" };
+      }
+
+      // 4. Strict security: An arbitrary caller merely knowing order ID or txnid is NEVER authorized
+      return { authorized: false, reason: "unauthorized" };
+    }
+
+    const testOrderId = "order-uuid-guest-1234";
+    const authenticGuestToken = "gst_token_sec_998877";
+
+    describe("14.1 Authenticated Checkout", () => {
+      it("authorizes order owner to initiate payment", () => {
+        const order = { id: testOrderId, user_id: "user-101", guest_tracking_token: null };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: { id: "user-101" },
+        });
+        expect(res.authorized).toBe(true);
+        expect(res.reason).toBe("order_owner");
+      });
+
+      it("authorizes order owner to verify payment", () => {
+        const order = { id: testOrderId, user_id: "user-101", guest_tracking_token: null };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: { id: "user-101" },
+          providedTxnId: "TXN_TEST_101",
+        });
+        expect(res.authorized).toBe(true);
+        expect(res.reason).toBe("order_owner");
+      });
+
+      it("authorizes admin user to initiate or verify any order", () => {
+        const order = { id: testOrderId, user_id: "user-101" };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: { id: "admin-999", role: "admin" },
+        });
+        expect(res.authorized).toBe(true);
+        expect(res.reason).toBe("admin");
+      });
+    });
+
+    describe("14.2 Guest Checkout Initiation", () => {
+      it("authorizes guest checkout initiation when valid guest_token is provided", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null,
+          providedGuestToken: authenticGuestToken,
+        });
+        expect(res.authorized).toBe(true);
+        expect(res.reason).toBe("valid_guest_token");
+      });
+
+      it("includes guest_token in preparePayUCheckout request payload", async () => {
+        const initiateParams = {
+          order_id: testOrderId,
+          order_number: "QM-GUEST-01",
+          amount: 250.0,
+          product_info: "Shipt Mart Guest Order",
+          customer_name: "Guest Student",
+          customer_email: "guest@campus.edu",
+          customer_phone: "9876543210",
+          guest_token: authenticGuestToken,
+        };
+
+        const result = await preparePayUCheckout(initiateParams);
+        expect(result.surl).toContain(`guest_token=${encodeURIComponent(authenticGuestToken)}`);
+        expect(result.furl).toContain(`guest_token=${encodeURIComponent(authenticGuestToken)}`);
+      });
+    });
+
+    describe("14.3 Guest Payment Verification", () => {
+      it("authorizes guest payment verification when valid guest_token is provided", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null,
+          providedGuestToken: authenticGuestToken,
+          providedTxnId: "TXN_GUEST_01",
+        });
+        expect(res.authorized).toBe(true);
+        expect(res.reason).toBe("valid_guest_token");
+      });
+
+      it("verifyPayUTransactionViaServerAPI accepts and forwards guestToken", async () => {
+        mockFunctionsInvoke.mockResolvedValueOnce({
+          data: {
+            success: true,
+            verified: true,
+            data: { status: "placed", payment_status: "paid", order_id: testOrderId },
+          },
+          error: null,
+        });
+
+        const res = await verifyPayUTransactionViaServerAPI({
+          orderId: testOrderId,
+          txnid: "TXN_GUEST_01",
+          guestToken: authenticGuestToken,
+        });
+        expect(res.success).toBe(true);
+        expect(mockFunctionsInvoke).toHaveBeenCalledWith(
+          "payu-webhook",
+          expect.objectContaining({
+            body: expect.objectContaining({
+              action: "verify_payment",
+              order_id: testOrderId,
+              txnid: "TXN_GUEST_01",
+              guest_token: authenticGuestToken,
+            }),
+          })
+        );
+      });
+
+      it("verifyPayUTransactionViaServerAPI accepts snake_case guest_token for backward compatibility", async () => {
+        mockFunctionsInvoke.mockResolvedValueOnce({
+          data: {
+            success: true,
+            verified: true,
+            data: { status: "placed", payment_status: "paid", order_id: testOrderId },
+          },
+          error: null,
+        });
+
+        const res = await verifyPayUTransactionViaServerAPI({
+          orderId: testOrderId,
+          txnid: "TXN_GUEST_01",
+          guest_token: authenticGuestToken,
+        });
+        expect(res.success).toBe(true);
+        expect(mockFunctionsInvoke).toHaveBeenCalledWith(
+          "payu-webhook",
+          expect.objectContaining({
+            body: expect.objectContaining({
+              action: "verify_payment",
+              order_id: testOrderId,
+              txnid: "TXN_GUEST_01",
+              guest_token: authenticGuestToken,
+            }),
+          })
+        );
+      });
+    });
+
+    describe("14.4 Invalid Guest Token Rejection", () => {
+      it("rejects guest initiation when guest_token is missing", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null,
+          providedGuestToken: null,
+        });
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+
+      it("rejects guest initiation when guest_token is forged or incorrect", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null,
+          providedGuestToken: "forged_invalid_token_999",
+        });
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+
+      it("rejects guest verification when guest_token is incorrect", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null,
+          providedGuestToken: "wrong_token",
+          providedTxnId: "TXN_GUEST_01",
+        });
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+    });
+
+    describe("14.5 Cross-Customer Order Access Rejection", () => {
+      it("rejects authenticated User B attempting to access User A's order", () => {
+        const order = { id: testOrderId, user_id: "user-101", guest_tracking_token: null };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: { id: "user-202" }, // Different user
+        });
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+
+      it("rejects authenticated user attempting to hijack a guest order without guest token", () => {
+        const order = { id: testOrderId, user_id: null, guest_tracking_token: authenticGuestToken };
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: { id: "user-202" }, // Unrelated user
+          providedGuestToken: null,
+        });
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+
+      it("never authorizes a caller merely because they supply an order ID and transaction ID", () => {
+        const order = {
+          id: testOrderId,
+          user_id: "user-101",
+          guest_tracking_token: authenticGuestToken,
+          payu_txnid: "TXN_KNOWN_123",
+        };
+
+        // Attacker knows order ID and transaction ID from URL or network sniffing
+        const res = evaluateOrderAuthorization({
+          order,
+          callerAuthUser: null, // Not logged in as owner
+          providedTxnId: "TXN_KNOWN_123", // Supplies matched txnid
+          providedGuestToken: null, // But lacks authentic guest token or login
+        });
+
+        expect(res.authorized).toBe(false);
+        expect(res.reason).toBe("unauthorized");
+      });
+    });
+  });
 });
